@@ -45,8 +45,8 @@ jobs:
           cd kernel_src
           mkdir -p include
           wget -q -O include/btfm_slim.h https://raw.githubusercontent.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable/lineage-16.0/drivers/bluetooth/btfm_slim.h
-          head -20 include/btfm_slim.h
-          ls -la include/btfm_slim.h
+          wget -q -O include/btfm_slim_wcn3990.h https://raw.githubusercontent.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable/lineage-16.0/drivers/bluetooth/btfm_slim_wcn3990.h
+          ls -la include/btfm_slim*.h
 
       - name: Prepare defconfig
         run: |
