@@ -19,178 +19,136 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 1
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
-    # ==================== Docker内核编译 ====================
-    - name: Install kernel build dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          build-essential gcc-12-aarch64-linux-gnu g++-12-aarch64-linux-gnu \
-          libssl-dev bc bison flex libncurses5-dev libncurses-dev \
-          git wget curl unzip xz-utils cpio
+      - name: Install kernel build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gcc-12-aarch64-linux-gnu g++-12-aarch64-linux-gnu libssl-dev bc bison flex libncurses5-dev libncurses-dev git wget curl unzip xz-utils cpio
 
-    - name: Create kernel build symlinks
-      run: |
-        sudo ln -sf /usr/bin/aarch64-linux-gnu-gcc-12 /usr/bin/aarch64-linux-gnu-gcc || true
-        sudo ln -sf /usr/bin/aarch64-linux-gnu-g++-12 /usr/bin/aarch64-linux-gnu-g++ || true
-        aarch64-linux-gnu-gcc --version
+      - name: Create kernel build symlinks
+        run: |
+          sudo ln -sf /usr/bin/aarch64-linux-gnu-gcc-12 /usr/bin/aarch64-linux-gnu-gcc || true
+          sudo ln -sf /usr/bin/aarch64-linux-gnu-g++-12 /usr/bin/aarch64-linux-gnu-g++ || true
+          aarch64-linux-gnu-gcc --version
 
-    - name: Clone kernel source
-      run: |
-        git clone --single-branch --branch ${{ env.KERNEL_BRANCH }} \
-          ${{ env.KERNEL_REPO }} \
-          kernel_src
-        ls -la kernel_src/
+      - name: Clone kernel source
+        run: |
+          git clone --single-branch --branch ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_REPO }} kernel_src
+          ls -la kernel_src/
 
-- name: Download missing kernel headers
- run: |
- cd kernel_src
- # Download btfm_slim.h from GitHub
- # Note: #include <btfm_slim.h> uses angle brackets, searches in include/ path
- mkdir -p include/linux
- wget -q -O include/linux/btfm_slim.h \
- "https://raw.githubusercontent.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable/lineage-16.0/drivers/bluetooth/btfm_slim.h"
- head -20 include/linux/btfm_slim.h
- ls -la include/linux/btfm_slim.h
+      - name: Download missing kernel headers
+        run: |
+          cd kernel_src
+          mkdir -p include/linux
+          wget -q -O include/linux/btfm_slim.h https://raw.githubusercontent.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable/lineage-16.0/drivers/bluetooth/btfm_slim.h
+          head -20 include/linux/btfm_slim.h
+          ls -la include/linux/btfm_slim.h
 
-    - name: Prepare defconfig
-      run: |
-        cd kernel_src
-        # Use enchilada_defconfig as base for fajita (same SDM845 platform)
-        if [ ! -f arch/arm64/configs/fajita_defconfig ]; then
-          cp arch/arm64/configs/enchilada_defconfig arch/arm64/configs/fajita_defconfig
-        fi
-        ls -la arch/arm64/configs/fajita_defconfig
+      - name: Prepare defconfig
+        run: |
+          cd kernel_src
+          if [ ! -f arch/arm64/configs/fajita_defconfig ]; then
+            cp arch/arm64/configs/enchilada_defconfig arch/arm64/configs/fajita_defconfig
+          fi
+          ls -la arch/arm64/configs/fajita_defconfig
 
-    - name: Apply Docker kernel patches
-      run: |
-        cd kernel_src
-        bash ../scripts/apply-docker-kernel-patch-v2.sh
+      - name: Apply Docker kernel patches
+        run: |
+          cd kernel_src
+          bash ../scripts/apply-docker-kernel-patch-v2.sh
 
-    - name: Build Docker kernel
-      run: |
-        cd kernel_src
-        export ARCH=arm64
-        export SUBARCH=arm64
-        export CROSS_COMPILE=aarch64-linux-gnu-
-        export KCFLAGS="-Wno-error -fno-stack-protector"
-        export WERROR=0
-        
-        make fajita_defconfig
-        # Disable stack protector
-        sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/CONFIG_CC_STACKPROTECTOR_STRONG=n/g' .config || true
-        sed -i 's/CONFIG_CC_STACKPROTECTOR=y/CONFIG_CC_STACKPROTECTOR=n/g' .config || true
-        
-        make -j$(nproc) Image.gz WERROR=0
-        
-        ls -la arch/arm64/boot/Image.gz
+      - name: Build Docker kernel
+        run: |
+          cd kernel_src
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export KCFLAGS="-Wno-error -fno-stack-protector"
+          export WERROR=0
+          make fajita_defconfig
+          sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/CONFIG_CC_STACKPROTECTOR_STRONG=n/g' .config || true
+          sed -i 's/CONFIG_CC_STACKPROTECTOR=y/CONFIG_CC_STACKPROTECTOR=n/g' .config || true
+          make -j$(nproc) Image.gz WERROR=0
+          ls -la arch/arm64/boot/Image.gz
 
-    # ==================== 重新打包hybris-boot.img ====================
-    - name: Download base hybris-boot.img
-      run: |
-        mkdir -p boot_images
-        wget -q -O boot_images/hybris-boot.img "${{ env.HYBRIS_BOOT_URL }}"
-        ls -la boot_images/
+      - name: Download base hybris-boot.img
+        run: |
+          mkdir -p boot_images
+          wget -q -O boot_images/hybris-boot.img ${{ env.HYBRIS_BOOT_URL }}
+          ls -la boot_images/
 
-    - name: Repack boot.img with new kernel
-      run: |
-        cd boot_images
-        
-        # Install abootimg if not available
-        if ! command -v abootimg &> /dev/null; then
-          sudo apt-get install -y abootimg
-        fi
-        
-        # Extract hybris-boot.img (creates: bootimg.cfg, zImage, initrd.img, dtb)
-        abootimg -x hybris-boot.img
-        
-        # Replace kernel
-        cp ../kernel_src/arch/arm64/boot/Image.gz ./zImage
-        
-        # Repack hybris-boot.img
-        abootimg --create hybris-boot-new.img \
-          -f bootimg.cfg \
-          -k zImage \
-          -r initrd.img
-        
-        ls -la hybris-boot-new.img
-        abootimg -i hybris-boot-new.img
+      - name: Repack boot.img with new kernel
+        run: |
+          cd boot_images
+          if ! command -v abootimg &> /dev/null; then
+            sudo apt-get install -y abootimg
+          fi
+          abootimg -x hybris-boot.img
+          cp ../kernel_src/arch/arm64/boot/Image.gz ./zImage
+          abootimg --create hybris-boot-new.img -f bootimg.cfg -k zImage -r initrd.img
+          ls -la hybris-boot-new.img
+          abootimg -i hybris-boot-new.img
 
-    # ==================== 构建SailfishOS镜像 ====================
-    - name: Set up Docker container
-      run: |
-        sudo docker pull coderus/sailfishos-platform-sdk-base:latest
-        sudo docker run --privileged --name sailfish-sdk -d \
-          coderus/sailfishos-platform-sdk-base:latest \
-          tail -f /dev/null
-        sleep 5
+      - name: Set up Docker container
+        run: |
+          sudo docker pull coderus/sailfishos-platform-sdk-base:latest
+          sudo docker run --privileged --name sailfish-sdk -d coderus/sailfishos-platform-sdk-base:latest tail -f /dev/null
+          sleep 5
 
-    - name: Prepare workspace in container
-      run: |
-        # Create minimal workspace with only required files
-        mkdir -p workspace
-        cp fajita.env run-mic1.sh "Jolla-@RELEASE@-fajita-@ARCH@.ks" workspace/
-        cp boot_images/hybris-boot-new.img workspace/hybris-boot.img
-        
-        # Copy to container
-        sudo docker cp workspace sailfish-sdk:/workspace
-        
-        ls -la workspace/
+      - name: Prepare workspace in container
+        run: |
+          mkdir -p workspace
+          cp fajita.env run-mic1.sh Jolla-@RELEASE@-fajita-@ARCH@.ks workspace/
+          cp boot_images/hybris-boot-new.img workspace/hybris-boot.img
+          sudo docker cp workspace sailfish-sdk:/workspace
+          ls -la workspace/
 
-    - name: Check Docker container
-      run: |
-        sudo docker exec sailfish-sdk ls -la /workspace/
+      - name: Check Docker container
+        run: |
+          sudo docker exec sailfish-sdk ls -la /workspace/
 
-    - name: Run mic build inside Docker
-      run: |
-        sudo docker exec sailfish-sdk sh -c \
-          "cd /workspace && source ./fajita.env && sudo bash ./run-mic1.sh"
+      - name: Run mic build inside Docker
+        run: |
+          sudo docker exec sailfish-sdk sh -c "cd /workspace && source ./fajita.env && sudo bash ./run-mic1.sh"
 
-    - name: Find build output
-      run: |
-        echo "=== Checking build output ==="
-        sudo docker exec sailfish-sdk ls -la /workspace/
-        sudo docker exec sailfish-sdk find /workspace -name "*.zip" 2>/dev/null || true
-        sudo docker exec sailfish-sdk find /workspace -name "sfe-*" -type d 2>/dev/null || true
+      - name: Find build output
+        run: |
+          echo "=== Checking build output ==="
+          sudo docker exec sailfish-sdk ls -la /workspace/
+          sudo docker exec sailfish-sdk find /workspace -name "*.zip" 2>/dev/null || true
+          sudo docker exec sailfish-sdk find /workspace -name "sfe-*" -type d 2>/dev/null || true
 
-    # ==================== 归档构建产物 ====================
-    - name: Archive artifacts
-      run: |
-        sudo mkdir -p artifacts/
-        
-        # Find and copy the built image
-        OUTPUT_DIR=$(sudo docker exec sailfish-sdk ls /workspace/ | grep sfe- | head -1)
-        if [ -n "$OUTPUT_DIR" ]; then
-          sudo docker cp sailfish-sdk:/workspace/$OUTPUT_DIR/sailfishos-*.zip artifacts/
-        fi
-        
-        # Also copy hybris-boot.img for reference
-        cp boot_images/hybris-boot-new.img artifacts/
-        
-        ls -la artifacts/
+      - name: Archive artifacts
+        run: |
+          sudo mkdir -p artifacts/
+          OUTPUT_DIR=$(sudo docker exec sailfish-sdk ls /workspace/ | grep sfe- | head -1)
+          if [ -n "$OUTPUT_DIR" ]; then
+            sudo docker cp sailfish-sdk:/workspace/$OUTPUT_DIR/sailfishos-*.zip artifacts/
+          fi
+          cp boot_images/hybris-boot-new.img artifacts/
+          ls -la artifacts/
 
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: sailfishos-fajita-5.0.0.73-docker-kernel
-        path: artifacts/*.zip
-        retention-days: 5
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sailfishos-fajita-5.0.0.73-docker-kernel
+          path: artifacts/*.zip
+          retention-days: 5
 
-    - name: Upload hybris-boot.img
-      uses: actions/upload-artifact@v4
-      with:
-        name: hybris-boot-docker-kernel
-        path: artifacts/hybris-boot-new.img
-        retention-days: 5
+      - name: Upload hybris-boot.img
+        uses: actions/upload-artifact@v4
+        with:
+          name: hybris-boot-docker-kernel
+          path: artifacts/hybris-boot-new.img
+          retention-days: 5
 
-    # ==================== 清理 ====================
-    - name: Cleanup
-      if: always()
-      run: |
-        sudo docker stop sailfish-sdk 2>/dev/null || true
-        sudo docker rm sailfish-sdk 2>/dev/null || true
-        rm -rf workspace kernel_src boot_images
+      - name: Cleanup
+        if: always()
+        run: |
+          sudo docker stop sailfish-sdk 2>/dev/null || true
+          sudo docker rm sailfish-sdk 2>/dev/null || true
+          rm -rf workspace kernel_src boot_images
