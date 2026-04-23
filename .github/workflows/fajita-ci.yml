@@ -41,7 +41,7 @@ jobs:
 
     - name: Clone kernel source
       run: |
-        git clone --depth=1 --single-branch --branch ${{ env.KERNEL_BRANCH }} \
+        git clone --single-branch --branch ${{ env.KERNEL_BRANCH }} \
           ${{ env.KERNEL_REPO }} \
           kernel_src
         ls -la kernel_src/
