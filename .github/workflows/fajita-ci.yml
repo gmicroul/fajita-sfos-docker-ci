@@ -43,10 +43,10 @@ jobs:
       - name: Download missing kernel headers
         run: |
           cd kernel_src
-          mkdir -p include/linux
-          wget -q -O include/linux/btfm_slim.h https://raw.githubusercontent.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable/lineage-16.0/drivers/bluetooth/btfm_slim.h
-          head -20 include/linux/btfm_slim.h
-          ls -la include/linux/btfm_slim.h
+          mkdir -p include
+          wget -q -O include/btfm_slim.h https://raw.githubusercontent.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable/lineage-16.0/drivers/bluetooth/btfm_slim.h
+          head -20 include/btfm_slim.h
+          ls -la include/btfm_slim.h
 
       - name: Prepare defconfig
         run: |
