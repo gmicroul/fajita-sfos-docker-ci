@@ -61,6 +61,7 @@ jobs:
           cp -f drivers/media/platform/msm/camera_oneplus/cam_sync/*.h include/ 2>/dev/null || true
           cp -f drivers/platform/msm/ipa/ipa_v3/ipa_trace.h include/trace/ 2>/dev/null || true
           cp -f drivers/platform/msm/ipa/ipa_v2/ipa_trace.h include/trace/ 2>/dev/null || true
+          cp -f drivers/platform/msm/ipa/ipa_clients/rndis_ipa_trace.h include/trace/ 2>/dev/null || true
           ls -la include/kgsl*.h include/adreno*.h include/cam*.h 2>/dev/null | wc -l
 
       - name: Prepare defconfig
