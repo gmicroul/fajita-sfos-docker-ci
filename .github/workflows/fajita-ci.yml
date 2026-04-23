@@ -44,22 +44,14 @@ jobs:
         run: |
           cd kernel_src
           mkdir -p include
-          wget -q -O include/btfm_slim.h https://raw.githubusercontent.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable/lineage-16.0/drivers/bluetooth/btfm_slim.h
-          wget -q -O include/btfm_slim_wcn3990.h https://raw.githubusercontent.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable/lineage-16.0/drivers/bluetooth/btfm_slim_wcn3990.h
-          wget -q -O include/trace/mdss_pll_trace.h https://raw.githubusercontent.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable/lineage-16.0/drivers/clk/qcom/mdss/mdss_pll_trace.h
-          wget -q -O include/device_event.h https://raw.githubusercontent.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable/lineage-16.0/techpack/audio/asoc/device_event.h
-          wget -q -O include/kgsl_trace.h https://raw.githubusercontent.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable/lineage-16.0/drivers/gpu/msm/kgsl_trace.h
-          wget -q -O include/kgsl_device.h https://raw.githubusercontent.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable/lineage-16.0/drivers/gpu/msm/kgsl_device.h
-          wget -q -O include/adreno_drawctxt.h https://raw.githubusercontent.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable/lineage-16.0/drivers/gpu/msm/adreno_drawctxt.h
-          wget -q -O include/kgsl.h https://raw.githubusercontent.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable/lineage-16.0/drivers/gpu/msm/kgsl.h
-          wget -q -O include/kgsl_mmu.h https://raw.githubusercontent.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable/lineage-16.0/drivers/gpu/msm/kgsl_mmu.h
-          wget -q -O include/kgsl_iommu.h https://raw.githubusercontent.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable/lineage-16.0/drivers/gpu/msm/kgsl_iommu.h
-          wget -q -O include/kgsl_pwrctrl.h https://raw.githubusercontent.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable/lineage-16.0/drivers/gpu/msm/kgsl_pwrctrl.h
-          # Download all .h files from drivers/gpu/msm/ at once
-          cd include && for f in kgsl kgsl_device kgsl_mmu kgsl_iommu kgsl_pwrctrl kgsl_trace adreno_drawctxt; do
-            wget -q "https://raw.githubusercontent.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable/lineage-16.0/drivers/gpu/msm/${f}.h" 2>/dev/null || true
-          done
-          ls -la kgsl*.h adreno*.h 2>/dev/null | wc -l
+          # Copy headers from cloned kernel source
+          cp -f drivers/bluetooth/btfm_slim.h include/
+          cp -f drivers/bluetooth/btfm_slim_wcn3990.h include/
+          cp -f drivers/clk/qcom/mdss/mdss_pll_trace.h include/trace/
+          cp -f techpack/audio/asoc/device_event.h include/
+          # Copy ALL .h files from drivers/gpu/msm/
+          cp -f drivers/gpu/msm/*.h include/
+          ls -la include/kgsl*.h include/adreno*.h 2>/dev/null | wc -l
 
       - name: Prepare defconfig
         run: |
