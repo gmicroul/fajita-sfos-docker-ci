@@ -54,7 +54,12 @@ jobs:
           wget -q -O include/kgsl.h https://raw.githubusercontent.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable/lineage-16.0/drivers/gpu/msm/kgsl.h
           wget -q -O include/kgsl_mmu.h https://raw.githubusercontent.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable/lineage-16.0/drivers/gpu/msm/kgsl_mmu.h
           wget -q -O include/kgsl_iommu.h https://raw.githubusercontent.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable/lineage-16.0/drivers/gpu/msm/kgsl_iommu.h
-          ls -la include/kgsl*.h include/adreno_drawctxt.h
+          wget -q -O include/kgsl_pwrctrl.h https://raw.githubusercontent.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable/lineage-16.0/drivers/gpu/msm/kgsl_pwrctrl.h
+          # Download all .h files from drivers/gpu/msm/ at once
+          cd include && for f in kgsl kgsl_device kgsl_mmu kgsl_iommu kgsl_pwrctrl kgsl_trace adreno_drawctxt; do
+            wget -q "https://raw.githubusercontent.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable/lineage-16.0/drivers/gpu/msm/${f}.h" 2>/dev/null || true
+          done
+          ls -la kgsl*.h adreno*.h 2>/dev/null | wc -l
 
       - name: Prepare defconfig
         run: |
