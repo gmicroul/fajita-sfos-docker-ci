@@ -54,6 +54,8 @@ jobs:
           # Copy camera_oneplus headers
           cp -f drivers/media/platform/msm/camera_oneplus/cam_core/*.h include/
           cp -f drivers/media/platform/msm/camera_oneplus/cam_utils/*.h include/ 2>/dev/null || true
+          cp -f drivers/media/platform/msm/camera_oneplus/cam_isp/isp_hw_mgr/*.h include/ 2>/dev/null || true
+          cp -f drivers/media/platform/msm/camera_oneplus/cam_isp/isp_hw_mgr/hw_utils/include/*.h include/ 2>/dev/null || true
           ls -la include/kgsl*.h include/adreno*.h include/cam*.h 2>/dev/null | wc -l
 
       - name: Prepare defconfig
