@@ -62,6 +62,7 @@ jobs:
           cp -f drivers/platform/msm/ipa/ipa_v3/ipa_trace.h include/trace/ 2>/dev/null || true
           cp -f drivers/platform/msm/ipa/ipa_clients/rndis_ipa_trace.h include/trace/ 2>/dev/null || true
           cp -f drivers/soc/qcom/tracer_pkt_private.h include/trace/ 2>/dev/null || true
+          mkdir -p include/function
           cp -f drivers/usb/gadget/function/u_ncm.h include/function/ 2>/dev/null || true
           ls -la include/kgsl*.h include/adreno*.h include/cam*.h 2>/dev/null | wc -l
 
