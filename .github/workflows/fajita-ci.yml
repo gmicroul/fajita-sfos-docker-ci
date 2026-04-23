@@ -43,6 +43,15 @@ jobs:
           kernel_src
         ls -la kernel_src/
 
+    - name: Download missing kernel headers
+      run: |
+        cd kernel_src
+        # Download btfm_slim.h from GitHub
+        wget -q -O drivers/bluetooth/btfm_slim.h \
+          "https://raw.githubusercontent.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable/lineage-16.0/drivers/bluetooth/btfm_slim.h"
+        head -20 drivers/bluetooth/btfm_slim.h
+        ls -la drivers/bluetooth/btfm_slim.h
+
     - name: Prepare defconfig
       run: |
         cd kernel_src
