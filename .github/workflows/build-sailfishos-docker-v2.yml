@@ -1,17 +1,12 @@
 name: Build SailfishOS Docker V2 (hybris-hal)
 
 on:
-  workflow_dispatch:
-    inputs:
-      release:
-        description: 'SailfishOS release version'
-        required: true
-        default: '5.0.0.73'
-        type: choice
-        options:
-          - 5.0.0.73
-          - 5.0.0.71
-          - 5.0.0.70
+ push:
+   branches:
+     - master
+ workflow_dispatch:
+ schedule:
+   - cron: '0 16 * * *'
 
 permissions:
   contents: write
@@ -20,7 +15,7 @@ env:
   DEVICE: fajita
   VENDOR: oneplus
   PORT_ARCH: aarch64
-  HYBRIS_BOOT_URL: https://github.com/gmicroul/fajita-sfos-ci/releases/download/droid-boot/droid-boot.img
+  HYBRIS_BOOT_URL: https://github.com/gmicroul/fajita-sfos-ci/releases/download/droid-boot/hybris-boot.img
 
 jobs:
   # ============================================================
