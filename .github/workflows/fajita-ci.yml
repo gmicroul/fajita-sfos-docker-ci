@@ -1,11 +1,11 @@
 name: Build SailfishOS for fajita with Docker kernel
 on:
- push:
- branches:
- - master
- workflow_dispatch:
- schedule:
- - cron: '0 0 * * *'
+  push:
+    branches:
+      - master
+  workflow_dispatch: null
+  schedule:
+    - cron: '0 0 * * *'
 
 env:
   DEVICE: fajita
