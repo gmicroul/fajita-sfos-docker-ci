@@ -142,15 +142,19 @@ jobs:
           sudo docker exec sailfish-sdk find /workspace -name "*.zip" 2>/dev/null || true
           sudo docker exec sailfish-sdk find /workspace -name "sfe-*" -type d 2>/dev/null || true
 
-      - name: Archive artifacts
-        run: |
-          sudo mkdir -p artifacts/
-          OUTPUT_DIR=$(sudo docker exec sailfish-sdk ls /workspace/ | grep sfe- | head -1)
-          if [ -n "$OUTPUT_DIR" ]; then
-            sudo docker cp sailfish-sdk:/workspace/$OUTPUT_DIR/sailfishos-*.zip artifacts/
+- name: Archive artifacts
+      run: |
+        sudo mkdir -p artifacts/
+        OUTPUT_DIR=$(sudo docker exec sailfish-sdk ls /workspace/ | grep sfe- | head -1)
+        if [ -n "$OUTPUT_DIR" ]; then
+          # Docker cp 不支持通配符，需要先找到确切路径
+          ZIP_FILE=$(sudo docker exec sailfish-sdk find /workspace/$OUTPUT_DIR -name "sailfishos-*.zip" -type f 2>/dev/null | head -1)
+          if [ -n "$ZIP_FILE" ]; then
+            sudo docker cp sailfish-sdk:$ZIP_FILE artifacts/
           fi
-          cp boot_images/hybris-boot-new.img artifacts/
-          ls -la artifacts/
+        fi
+        cp boot_images/hybris-boot-new.img artifacts/
+        ls -la artifacts/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
