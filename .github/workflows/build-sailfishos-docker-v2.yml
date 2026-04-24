@@ -140,6 +140,7 @@ jobs:
         run: |
           sudo docker exec sailfish-sdk sh -c "
             cd /workspace && \
+            apt-get update && apt-get install -y wget && \
             wget -q -O hybris-boot.img '${{ env.HYBRIS_BOOT_URL }}' && \
             ls -lh hybris-boot.img
           "
