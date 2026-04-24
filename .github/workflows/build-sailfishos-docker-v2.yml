@@ -1,0 +1,338 @@
+name: Build SailfishOS Docker V2 (hybris-hal)
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'SailfishOS release version'
+        required: true
+        default: '5.0.0.73'
+        type: choice
+        options:
+          - 5.0.0.73
+          - 5.0.0.71
+          - 5.0.0.70
+
+permissions:
+  contents: write
+
+env:
+  DEVICE: fajita
+  VENDOR: oneplus
+  PORT_ARCH: aarch64
+  HYBRIS_BOOT_URL: https://github.com/gmicroul/fajita-sfos-ci/releases/download/droid-boot/droid-boot.img
+
+jobs:
+  # ============================================================
+  # Job 1: Build Docker kernel in GitHub Actions
+  # ============================================================
+  build-docker-kernel:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install kernel build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential gcc-12-aarch64-linux-gnu g++-12-aarch64-linux-gnu \
+            libssl-dev bc bison flex libncurses5-dev libncurses-dev \
+            git wget curl unzip xz-utils cpio
+
+      - name: Create kernel build symlinks
+        run: |
+          sudo ln -sf /usr/bin/aarch64-linux-gnu-gcc-12 /usr/bin/aarch64-linux-gnu-gcc || true
+          sudo ln -sf /usr/bin/aarch64-linux-gnu-g++-12 /usr/bin/aarch64-linux-gnu-g++ || true
+          aarch64-linux-gnu-gcc --version
+
+      - name: Clone kernel source
+        run: |
+          git clone --single-branch --branch lineage-16.0 \
+            https://github.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable.git \
+            kernel_src
+          cd kernel_src && ls -la
+
+      - name: Download missing kernel headers
+        run: |
+          cd kernel_src
+          mkdir -p include include/trace include/function
+          # Copy headers from cloned kernel source
+          cp -f drivers/bluetooth/btfm_slim.h include/
+          cp -f drivers/bluetooth/btfm_slim_wcn3990.h include/
+          cp -f drivers/clk/qcom/mdss/mdss_pll_trace.h include/trace/
+          cp -f techpack/audio/asoc/device_event.h include/
+          # Copy ALL .h files from drivers/gpu/msm/
+          cp -f drivers/gpu/msm/*.h include/
+          # Copy camera_oneplus headers
+          cp -f drivers/media/platform/msm/camera_oneplus/cam_core/*.h include/ 2>/dev/null || true
+          cp -f drivers/media/platform/msm/camera_oneplus/cam_utils/*.h include/ 2>/dev/null || true
+          cp -f drivers/media/platform/msm/camera_oneplus/cam_isp/isp_hw_mgr/*.h include/ 2>/dev/null || true
+          cp -f drivers/media/platform/msm/camera_oneplus/cam_isp/isp_hw_mgr/hw_utils/include/*.h include/ 2>/dev/null || true
+          cp -f drivers/media/platform/msm/camera_oneplus/cam_req_mgr/*.h include/ 2>/dev/null || true
+          cp -f drivers/media/platform/msm/camera_oneplus/cam_sensor_module/cam_sensor_utils/*.h include/ 2>/dev/null || true
+          cp -f drivers/media/platform/msm/camera_oneplus/cam_sync/*.h include/ 2>/dev/null || true
+          cp -f drivers/platform/msm/ipa/ipa_v3/ipa_trace.h include/trace/ 2>/dev/null || true
+          cp -f drivers/platform/msm/ipa/ipa_clients/rndis_ipa_trace.h include/trace/ 2>/dev/null || true
+          cp -f drivers/soc/qcom/tracer_pkt_private.h include/trace/ 2>/dev/null || true
+          cp -f drivers/usb/gadget/function/u_ncm.h include/function/ 2>/dev/null || true
+          ls -la include/kgsl*.h include/adreno*.h include/cam*.h 2>/dev/null | wc -l
+
+      - name: Prepare defconfig
+        run: |
+          cd kernel_src
+          if [ ! -f arch/arm64/configs/fajita_defconfig ]; then
+            cp arch/arm64/configs/enchilada_defconfig arch/arm64/configs/fajita_defconfig
+          fi
+          ls -la arch/arm64/configs/fajita_defconfig
+
+      - name: Apply Docker kernel patches
+        run: |
+          cd kernel_src
+          bash ../scripts/apply-docker-kernel-patch-v2.sh
+
+      - name: Build Docker kernel
+        run: |
+          cd kernel_src
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export KCFLAGS="-Wno-error -fno-stack-protector"
+          export WERROR=0
+          make fajita_defconfig
+          sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/CONFIG_CC_STACKPROTECTOR_STRONG=n/g' .config || true
+          sed -i 's/CONFIG_CC_STACKPROTECTOR=y/CONFIG_CC_STACKPROTECTOR=n/g' .config || true
+          make -j$(nproc) Image.gz WERROR=0
+          ls -la arch/arm64/boot/Image.gz
+
+      - name: Upload Docker kernel
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-kernel-Image.gz
+          path: kernel_src/arch/arm64/boot/Image.gz
+          retention-days: 5
+
+  # ============================================================
+  # Job 2: Build hybris-boot.img with mka in sailfish-sdk
+  # ============================================================
+  build-hybris-boot:
+    runs-on: ubuntu-22.04
+    needs: build-docker-kernel
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download Docker kernel
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-kernel-Image.gz
+          path: ./
+
+      - name: Verify kernel
+        run: |
+          ls -lh Image.gz
+          file Image.gz
+
+      - name: Setup Docker container
+        run: |
+          sudo docker pull coderus/sailfishos-platform-sdk-base:latest
+          sudo docker run --privileged --name sailfish-sdk -d coderus/sailfishos-platform-sdk-base:latest tail -f /dev/null
+          sleep 5
+
+      - name: Copy kernel into container
+        run: |
+          sudo docker cp Image.gz sailfish-sdk:/workspace/Image.gz
+
+      - name: Download original hybris-boot.img
+        run: |
+          sudo docker exec sailfish-sdk sh -c "
+            cd /workspace && \
+            wget -q -O hybris-boot.img '${{ env.HYBRIS_BOOT_URL }}' && \
+            ls -lh hybris-boot.img
+          "
+
+      - name: Repack hybris-boot.img with new kernel
+        run: |
+          sudo docker exec sailfish-sdk sh -c "
+            cd /workspace && \
+            apt-get update && apt-get install -y abootimg && \
+            abootimg -x hybris-boot.img && \
+            cp Image.gz zImage && \
+            abootimg --create hybris-boot-new.img -f bootimg.cfg -k zImage -r initrd.img && \
+            ls -lh hybris-boot-new.img && \
+            abootimg -i hybris-boot-new.img
+          "
+
+      - name: Upload hybris-boot-new.img
+        uses: actions/upload-artifact@v4
+        with:
+          name: hybris-boot-docker.img
+          path: hybris-boot-new.img
+          retention-days: 5
+
+      - name: Cleanup
+        if: always()
+        run: |
+          sudo docker stop sailfish-sdk 2>/dev/null || true
+          sudo docker rm sailfish-sdk 2>/dev/null || true
+
+  # ============================================================
+  # Job 3: Build SailfishOS system image with mic
+  # ============================================================
+  build-sailfishos-image:
+    runs-on: ubuntu-22.04
+    needs: build-docker-kernel
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Docker container
+        run: |
+          sudo docker pull coderus/sailfishos-platform-sdk-base:latest
+          sudo docker run --privileged --name sailfish-sdk -d coderus/sailfishos-platform-sdk-base:latest tail -f /dev/null
+          sleep 5
+
+      - name: Prepare workspace
+        run: |
+          mkdir -p workspace
+          cp fajita.env workspace/
+          cp run-mic1.sh workspace/
+          cp Jolla-@RELEASE@-fajita-@ARCH@.ks workspace/
+          # Replace @RELEASE@ in kickstart file
+          sed -i 's/@RELEASE@/${{ github.event.inputs.release || env.RELEASE }}/g' workspace/Jolla-@RELEASE@-fajita-@ARCH@.ks 2>/dev/null || true
+          # Copy kickstart with actual release version
+          RELEASE='${{ github.event.inputs.release || env.RELEASE }}'
+          sed "s/@RELEASE@/${RELEASE}/g; s/@ARCH@/aarch64/g" Jolla-@RELEASE@-fajita-@ARCH@.ks > workspace/Jolla-${RELEASE}-fajita-aarch64.ks
+          ls -la workspace/
+
+      - name: Copy files into Docker
+        run: |
+          sudo docker cp workspace sailfish-sdk:/workspace
+          sudo docker exec sailfish-sdk ls -la /workspace/
+
+      - name: Run mic build
+        run: |
+          sudo docker exec sailfish-sdk sh -c "
+            cd /workspace && \
+            source ./fajita.env && \
+            sudo bash ./run-mic1.sh
+          "
+
+      - name: Check build output
+        run: |
+          echo "=== Checking build output ==="
+          sudo docker exec sailfish-sdk ls -la /workspace/
+          sudo docker exec sailfish-sdk find /workspace -name "*.zip" 2>/dev/null || true
+          sudo docker exec sailfish-sdk find /workspace -name "sfe-*" -type d 2>/dev/null || true
+
+      - name: Archive artifacts
+        run: |
+          OUTPUT_DIR=$(sudo docker exec sailfish-sdk ls /workspace/ | grep sfe- | head -1)
+          if [ -n "$OUTPUT_DIR" ]; then
+            ZIP_FILE=$(sudo docker exec sailfish-sdk find /workspace/$OUTPUT_DIR -name "sailfishos-*.zip" -type f 2>/dev/null | head -1)
+            if [ -n "$ZIP_FILE" ]; then
+              sudo docker cp sailfish-sdk:$ZIP_FILE ./sailfishos-fajita.zip
+            fi
+          fi
+          ls -lh sailfishos-fajita.zip 2>/dev/null || echo "ZIP not found"
+
+      - name: Upload sailfishos zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: sailfishos-fajita-zip
+          path: sailfishos-fajita.zip
+          retention-days: 5
+
+      - name: Cleanup
+        if: always()
+        run: |
+          sudo docker stop sailfish-sdk 2>/dev/null || true
+          sudo docker rm sailfish-sdk 2>/dev/null || true
+
+  # ============================================================
+  # Job 4: Replace hybris-boot.img in zip and create release
+  # ============================================================
+  create-release:
+    runs-on: ubuntu-latest
+    needs: [build-hybris-boot, build-sailfishos-image]
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download hybris-boot.img
+        uses: actions/download-artifact@v4
+        with:
+          name: hybris-boot-docker.img
+          path: ./
+
+      - name: Download sailfishos zip
+        uses: actions/download-artifact@v4
+        with:
+          name: sailfishos-fajita-zip
+          path: ./
+
+      - name: Replace hybris-boot.img in zip
+        run: |
+          echo "=== Files available ==="
+          ls -lh
+
+          echo "=== Replacing hybris-boot.img in zip ==="
+          mv sailfishos-fajita.zip sailfishos-original.zip
+          mkdir -p zip_temp && cd zip_temp
+          unzip -o ../sailfishos-original.zip
+          cp ../hybris-boot-new.img hybris-boot.img
+          zip -r ../sailfishos-fajita-docker.zip .
+          cd ..
+          ls -lh sailfishos-fajita-docker.zip
+
+          # Clean up
+          rm -rf zip_temp sailfishos-original.zip
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: sailfishos-docker-${{ env.RELEASE }}-${{ github.run_number }}
+          name: SailfishOS Docker - ${{ env.RELEASE }} - Build ${{ github.run_number }}
+          body: |
+            ## SailfishOS Docker for ${{ env.DEVICE }}
+
+            ### Build Information
+            - **Device**: ${{ env.DEVICE }}
+            - **SailfishOS Release**: ${{ env.RELEASE }}
+            - **Kernel**: sdm845 with Docker support
+            - **Build Number**: ${{ github.run_number }}
+
+            ### Files
+            - `sailfishos-fajita-docker.zip` - Complete SailfishOS system with Docker kernel
+            - `hybris-boot-new.img` - Boot image with Docker kernel
+
+            ### Installation
+            Flash the ZIP via TWRP:
+            ```
+            adb sideload sailfishos-fajita-docker.zip
+            ```
+
+            ### Docker Support
+            This build includes a kernel with full Docker support:
+            - Namespaces and Cgroups
+            - Overlay filesystem
+            - Network filtering and masquerading
+            - Bridge and VXLAN support
+
+            Built by GitHub Actions
+          files: |
+            sailfishos-fajita-docker.zip
+            hybris-boot-new.img
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
