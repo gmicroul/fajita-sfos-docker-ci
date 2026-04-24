@@ -104,71 +104,70 @@ jobs:
           path: kernel_src/arch/arm64/boot/Image.gz
           retention-days: 5
 
-  build-hybris-boot:
+build-hybris-boot:
     runs-on: ubuntu-22.04
     needs: build-docker-kernel
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
 
-      - name: Download Docker kernel
-        uses: actions/download-artifact@v4
-        with:
-          name: docker-kernel-Image.gz
-          path: ./
+    - name: Download Docker kernel
+      uses: actions/download-artifact@v4
+      with:
+        name: docker-kernel-Image.gz
+        path: ./
 
-      - name: Verify kernel
-        run: |
-          ls -lh Image.gz
-          file Image.gz
+    - name: Verify kernel
+      run: |
+        ls -lh Image.gz
+        file Image.gz
 
-      - name: Setup Docker container
-        run: |
-          sudo docker pull coderus/sailfishos-platform-sdk-base:latest
-          sudo docker run --privileged --name sailfish-sdk -d coderus/sailfishos-platform-sdk-base:latest tail -f /dev/null
-          sleep 5
-          sudo docker exec sailfish-sdk mkdir -p /workspace
+    - name: Setup Docker container with Sailfish SDK
+      run: |
+        sudo docker pull coderus/sailfishos-platform-sdk-base:latest
+        sudo docker run --privileged --name sailfish-sdk -d coderus/sailfishos-platform-sdk-base:latest tail -f /dev/null
+        sleep 5
+        sudo docker exec sailfish-sdk mkdir -p /workspace
 
-      - name: Copy kernel into container
-        run: |
-          sudo docker cp Image.gz sailfish-sdk:/workspace/Image.gz
+    - name: Copy kernel into container
+      run: |
+        sudo docker cp Image.gz sailfish-sdk:/workspace/Image.gz
 
-      - name: Download original hybris-boot.img
-        run: |
-          sudo docker exec sailfish-sdk sh -c "
-            cd /workspace && \
-            apt-get update && apt-get install -y wget && \
-            wget -q -O hybris-boot.img '${{ env.HYBRIS_BOOT_URL }}' && \
-            ls -lh hybris-boot.img
-          "
+    - name: Download original hybris-boot.img and repack (in SDK container)
+      run: |
+        # 在 sailfish-sdk 容器内完成下载和打包，使用 zypper (SUSE)
+        sudo docker exec sailfish-sdk sh -c "
+        cd /workspace && \
+        zypper -n install -y wget abootimg && \
+        wget -q -O hybris-boot.img '${{ env.HYBRIS_BOOT_URL }}' && \
+        ls -lh hybris-boot.img && \
+        abootimg -x hybris-boot.img && \
+        cp Image.gz zImage && \
+        abootimg --create hybris-boot-new.img -f bootimg.cfg -k zImage -r initrd.img && \
+        ls -lh hybris-boot-new.img && \
+        abootimg -i hybris-boot-new.img
+        "
 
-      - name: Repack hybris-boot.img with new kernel
-        run: |
-          sudo docker exec sailfish-sdk sh -c "
-            cd /workspace && \
-            apt-get update && apt-get install -y abootimg && \
-            abootimg -x hybris-boot.img && \
-            cp Image.gz zImage && \
-            abootimg --create hybris-boot-new.img -f bootimg.cfg -k zImage -r initrd.img && \
-            ls -lh hybris-boot-new.img && \
-            abootimg -i hybris-boot-new.img
-          "
+    - name: Copy hybris-boot-new.img back to host
+      run: |
+        sudo docker cp sailfish-sdk:/workspace/hybris-boot-new.img ./hybris-boot-new.img
+        ls -lh hybris-boot-new.img
 
-      - name: Upload hybris-boot-new.img
-        uses: actions/upload-artifact@v4
-        with:
-          name: hybris-boot-docker.img
-          path: hybris-boot-new.img
-          retention-days: 5
+    - name: Upload hybris-boot-new.img
+      uses: actions/upload-artifact@v4
+      with:
+        name: hybris-boot-docker.img
+        path: hybris-boot-new.img
+        retention-days: 5
 
-      - name: Cleanup
-        if: always()
-        run: |
-          sudo docker stop sailfish-sdk 2>/dev/null || true
-          sudo docker rm sailfish-sdk 2>/dev/null || true
+    - name: Cleanup
+      if: always()
+      run: |
+        sudo docker stop sailfish-sdk 2>/dev/null || true
+        sudo docker rm sailfish-sdk 2>/dev/null || true
 
   build-sailfishos-image:
     runs-on: ubuntu-22.04
