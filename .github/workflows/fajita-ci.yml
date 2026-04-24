@@ -1,6 +1,6 @@
 name: Build SailfishOS for fajita with Docker kernel
 on:
-  push:
+#  push:
 #    branches:
 #      - master
   workflow_dispatch:
