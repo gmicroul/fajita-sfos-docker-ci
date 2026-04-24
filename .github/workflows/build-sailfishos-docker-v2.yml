@@ -134,13 +134,14 @@ jobs:
           ls -lh Image.gz
           file Image.gz
 
-      - name: Setup Docker container
-        run: |
-          sudo docker pull coderus/sailfishos-platform-sdk-base:latest
-          sudo docker run --privileged --name sailfish-sdk -d coderus/sailfishos-platform-sdk-base:latest tail -f /dev/null
-          sleep 5
+- name: Setup Docker container
+ run: |
+   sudo docker pull coderus/sailfishos-platform-sdk-base:latest
+   sudo docker run --privileged --name sailfish-sdk -d coderus/sailfishos-platform-sdk-base:latest tail -f /dev/null
+   sleep 5
+   sudo docker exec sailfish-sdk mkdir -p /workspace
 
-      - name: Copy kernel into container
+ - name: Copy kernel into container
         run: |
           sudo docker cp Image.gz sailfish-sdk:/workspace/Image.gz
 
