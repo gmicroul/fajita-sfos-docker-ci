@@ -106,8 +106,6 @@ jobs:
 
 prepare-initrd:
   runs-on: ubuntu-22.04
-  outputs:
-    initrd_available: steps.check.outputs.available
 
   steps:
   - name: Checkout repository
@@ -115,20 +113,7 @@ prepare-initrd:
     with:
       fetch-depth: 1
 
-  - name: Check for existing initrd artifact
-    id: check
-    run: |
-      # Try to find initrd from previous runs
-      if curl -s -f "https://api.github.com/repos/gmicroul/fajita-sfos-ci/actions/artifacts?per_page=100" \
-        -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" | \
-        python3 -c "import sys,json; arts=json.load(sys.stdin); print('found' if any('initrd' in a['name'] for a in arts['artifacts']) else 'not_found')" 2>/dev/null; then
-        echo "available=true" >> $GITHUB_OUTPUT
-      else
-        echo "available=false" >> $GITHUB_OUTPUT
-      fi
-
-  - name: Download initrd if not available
-    if: steps.check.outputs.available == 'false'
+  - name: Download and extract initrd
     run: |
       sudo apt-get update && sudo apt-get install -y abootimg
       wget -q -O hybris-boot.img '${{ env.HYBRIS_BOOT_URL }}'
@@ -136,7 +121,6 @@ prepare-initrd:
       ls -lh bootimg.cfg zImage initrd.img
 
   - name: Upload initrd as artifact
-    if: steps.check.outputs.available == 'false'
     uses: actions/upload-artifact@v4
     with:
       name: sailfish-initrd
