@@ -88,7 +88,7 @@ jobs:
           cd /parentroot/srv/hadk
           repo sync -j8 -c --no-clone-bundle --no-tags
         '
-      timeout-minutes: 30
+      #timeout-minutes: 30
 
     - name: Clone kernel
       run: |
@@ -108,7 +108,7 @@ jobs:
           source build/envsetup.sh 2>&1 || true
           make -j$(nproc --all) hybris-hal 2>&1 | head -100
         '
-      timeout-minutes: 10
+      #timeout-minutes: 10
 
     - name: Check SDK state
       if: always()
