@@ -62,7 +62,6 @@ jobs:
 
     - name: Prepare SDK directories
       run: |
-        # 等待 SDK 启动
         for i in {1..30}; do
           if sudo docker exec sailfish-sdk ls /srv/mer 2>/dev/null; then
             echo "SDK ready"
@@ -70,12 +69,8 @@ jobs:
           fi
           sleep 2
         done
-        
-        # 创建目录结构
         sudo docker exec sailfish-sdk mkdir -p /parentroot/srv/hadk
         sudo docker exec sailfish-sdk mkdir -p ~/bin
-        
-        # 复制 repo 工具到 SDK
         sudo docker cp ~/bin/repo sailfish-sdk:/home/mersdk/bin/repo
 
     - name: Init repo in SDK
@@ -109,13 +104,8 @@ jobs:
           export PATH=$PATH:~/bin
           export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64/
           export PATH=$JAVA_HOME/bin:$PATH
-          
           cd /parentroot/srv/hadk
-          
-          # 设置环境
           source build/envsetup.sh 2>&1 || true
-          
-          # 尝试编译 - 故意不设置 DEVICE 看报什么错
           make -j$(nproc --all) hybris-hal 2>&1 | head -100
         '
       timeout-minutes: 10
