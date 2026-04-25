@@ -210,8 +210,7 @@ jobs:
         mkdir -p workspace
         cp fajita.env workspace/
         cp run-mic1.sh workspace/
-        RELEASE='${{ env.RELEASE }}'
-        sed "s/@RELEASE@/${RELEASE}/g; s/@ARCH@/aarch64/g" Jolla-@RELEASE@-fajita-@ARCH@.ks > workspace/Jolla-${RELEASE}-fajita-aarch64.ks
+        cp Jolla-@RELEASE@-fajita-@ARCH@.ks workspace/
         ls -la workspace/
 
     - name: Copy files into Docker
