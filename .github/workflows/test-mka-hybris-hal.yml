@@ -1,0 +1,141 @@
+name: Test mka hybris-hal in SDK
+
+on:
+  workflow_dispatch:
+
+env:
+  DEVICE: fajita
+  VENDOR: oneplus
+  PORT_ARCH: aarch64
+  HYBRIS_BRANCH: hybris-14.1
+  ANDROID_ROOT: /parentroot/srv/hadk
+  KERNEL_REPO: https://github.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable.git
+  KERNEL_BRANCH: lineage-16.0
+  RELEASE: 5.0.0.73
+  SAILFISH_SDK_VERSION: 4.5.0.16
+
+jobs:
+  test-mka:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+
+    - name: Maximize build space
+      uses: easimon/maximize-build-space@master
+      with:
+        root-reserve-mb: 20480
+        swap-size-mb: 4096
+        remove-dotnet: 'true'
+        remove-haskell: 'true'
+        remove-android: 'true'
+        remove-docker-images: 'true'
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          openjdk-8-jdk android-tools-adb bc bison \
+          build-essential curl flex g++-multilib gcc-multilib gnupg gperf \
+          imagemagick lib32ncurses-dev qemu-user-static \
+          lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev libsdl1.2-dev libssl-dev \
+          libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc yasm zip zlib1g-dev \
+          qemu-user-static qemu-system-arm e2fsprogs simg2img \
+          libtinfo5 libncurses5 gzip virtualenv git python2
+
+    - name: Download repo
+      run: |
+        mkdir -p ~/bin
+        wget 'https://storage.googleapis.com/git-repo-downloads/repo' -P ~/bin
+        chmod +x ~/bin/repo
+        git config --global user.name "TestUser"
+        git config --global user.email "test@test.com"
+
+    - name: Setup Docker container (SDK)
+      run: |
+        sudo docker pull coderus/sailfishos-platform-sdk:${{ env.SAILFISH_SDK_VERSION }}
+        sudo docker run --privileged --name sailfish-sdk -d coderus/sailfishos-platform-sdk:${{ env.SAILFISH_SDK_VERSION }} tail -f /dev/null
+        sleep 5
+
+    - name: Clone Android source in SDK
+      run: |
+        # 等待 SDK 启动
+        for i in {1..30}; do
+          if sudo docker exec sailfish-sdk ls /srv/mer 2>/dev/null; then
+            echo "SDK ready"
+            break
+          fi
+          sleep 2
+        done
+        
+        # 创建目录结构
+        sudo docker exec sailfish-sdk mkdir -p /parentroot/srv/hadk
+        sudo docker exec sailfish-sdk mkdir -p ~/bin
+        
+        # 复制 repo 工具到 SDK
+        sudo docker cp ~/bin/repo sailfish-sdk:/home/mersdk/bin/repo
+
+    - name: Init repo in SDK
+      run: |
+        sudo docker exec sailfish-sdk bash -c '
+          export PATH=$PATH:~/bin
+          cd /parentroot/srv/hadk
+          repo init -u https://github.com/mer-hybris/android.git -b hybris-14.1 --depth=1
+        '
+
+    - name: Sync repo in SDK
+      run: |
+        # 分步同步，避免超时
+        sudo docker exec sailfish-sdk bash -c '
+          export PATH=$PATH:~/bin
+          cd /parentroot/srv/hadk
+          repo sync -j8 -c --no-clone-bundle --no-tags
+        '
+      timeout: 1800
+
+    - name: Clone device repos
+      run: |
+        # 临时用通用配置测试 mka
+        sudo docker exec sailfish-sdk bash -c '
+          cd /parentroot/srv/hadk
+          
+          # 尝试从 LineageOS 获取设备配置作为基础
+          git clone https://github.com/LineageOS/android_device_oneplus_sdm845 device/oneplus/sdm845 --depth=1 || true
+          git clone https://github.com/TheMopper/android_vendor_oneplus_sdm845 vendor/oneplus/sdm845 --depth=1 || true
+          
+          ls -la device/oneplus/ 2>/dev/null || echo "No device repo"
+          ls -la vendor/oneplus/ 2>/dev/null || echo "No vendor repo"
+        '
+
+    - name: Clone kernel
+      run: |
+        sudo docker exec sailfish-sdk bash -c '
+          cd /parentroot/srv/hadk
+          git clone --single-branch --branch lineage-16.0 $KERNEL_REPO kernel/oneplus/sdm845 || true
+          ls -la kernel/oneplus/sdm845/ 2>/dev/null | head -10
+        '
+
+    - name: Try mka hybris-hal
+      run: |
+        sudo docker exec sailfish-sdk bash -c '
+          export PATH=$PATH:~/bin
+          export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64/
+          export PATH=$JAVA_HOME/bin:$PATH
+          
+          cd /parentroot/srv/hadk
+          
+          # 设置环境
+          source build/envsetup.sh 2>&1 || true
+          
+          # 尝试编译
+          make -j$(nproc --all) hybris-hal 2>&1 | head -200
+        '
+      timeout: 600
+
+    - name: Check error
+      run: |
+        echo "=== Check SDK state ==="
+        sudo docker exec sailfish-sdk bash -c 'ls -la /parentroot/srv/hadk/ 2>/dev/null || echo "Hadk dir not found"'
