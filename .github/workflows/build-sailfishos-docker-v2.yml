@@ -15,6 +15,7 @@ env:
   DEVICE: fajita
   VENDOR: oneplus
   PORT_ARCH: aarch64
+  RELEASE: 5.0.0.73
   HYBRIS_BOOT_URL: https://github.com/gmicroul/fajita-sfos-ci/releases/download/droid-boot/hybris-boot.img
 
 jobs:
