@@ -121,11 +121,13 @@ jobs:
         abootimg -x hybris-boot.img
         ls -lh bootimg.cfg zImage initrd.img
 
-    - name: Upload initrd as artifact
+    - name: Upload initrd and bootimg.cfg as artifact
       uses: actions/upload-artifact@v4
       with:
         name: sailfish-initrd
-        path: initrd.img
+        path: |
+          initrd.img
+          bootimg.cfg
         retention-days: 30
 
   build-hybris-boot:
@@ -152,28 +154,12 @@ jobs:
 
     - name: Verify files
       run: |
-        ls -lh Image.gz initrd.img
+        ls -lh Image.gz initrd.img bootimg.cfg
         file Image.gz
 
-    - name: Setup Docker container with Sailfish SDK
+    - name: Build hybris-boot-new.img with abootimg
       run: |
-        sudo docker pull coderus/sailfishos-platform-sdk-base:latest
-        sudo docker run --privileged --name sailfish-sdk -d coderus/sailfishos-platform-sdk-base:latest tail -f /dev/null
-        sleep 5
-        sudo docker exec sailfish-sdk mkdir -p /workspace
-
-    - name: Copy kernel and initrd into container
-      run: |
-        sudo docker cp Image.gz sailfish-sdk:/workspace/Image.gz
-        sudo docker cp initrd.img sailfish-sdk:/workspace/initrd.img
-
-    - name: Build hybris-boot-new.img with mkbootimg (in SDK)
-      run: |
-        sudo docker exec sailfish-sdk sh -c "cd /workspace && mkbootimg --kernel Image.gz --ramdisk initrd.img --base 0x00000000 --pagesize 4096 --kernel_offset 0x00008000 --ramdisk_offset 0x01000000 --tags_offset 0x00000100 --output hybris-boot-new.img && ls -lh hybris-boot-new.img"
-
-    - name: Copy hybris-boot-new.img back to host
-      run: |
-        sudo docker cp sailfish-sdk:/workspace/hybris-boot-new.img ./hybris-boot-new.img
+        abootimg --create hybris-boot-new.img -f bootimg.cfg -k Image.gz -r initrd.img
         ls -lh hybris-boot-new.img
 
     - name: Upload hybris-boot-new.img
@@ -182,12 +168,6 @@ jobs:
         name: hybris-boot-docker.img
         path: hybris-boot-new.img
         retention-days: 5
-
-    - name: Cleanup
-      if: always()
-      run: |
-        sudo docker stop sailfish-sdk 2>/dev/null || true
-        sudo docker rm sailfish-sdk 2>/dev/null || true
 
   build-sailfishos-image:
     runs-on: ubuntu-22.04
