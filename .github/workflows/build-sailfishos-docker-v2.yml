@@ -104,67 +104,105 @@ jobs:
         path: kernel_src/arch/arm64/boot/Image.gz
         retention-days: 5
 
+prepare-initrd:
+  runs-on: ubuntu-22.04
+  outputs:
+    initrd_available: steps.check.outputs.available
+
+  steps:
+  - name: Checkout repository
+    uses: actions/checkout@v4
+    with:
+      fetch-depth: 1
+
+  - name: Check for existing initrd artifact
+    id: check
+    run: |
+      # Try to find initrd from previous runs
+      if curl -s -f "https://api.github.com/repos/gmicroul/fajita-sfos-ci/actions/artifacts?per_page=100" \
+        -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" | \
+        python3 -c "import sys,json; arts=json.load(sys.stdin); print('found' if any('initrd' in a['name'] for a in arts['artifacts']) else 'not_found')" 2>/dev/null; then
+        echo "available=true" >> $GITHUB_OUTPUT
+      else
+        echo "available=false" >> $GITHUB_OUTPUT
+      fi
+
+  - name: Download initrd if not available
+    if: steps.check.outputs.available == 'false'
+    run: |
+      sudo apt-get update && sudo apt-get install -y abootimg
+      wget -q -O hybris-boot.img '${{ env.HYBRIS_BOOT_URL }}'
+      abootimg -x hybris-boot.img
+      ls -lh bootimg.cfg zImage initrd.img
+
+  - name: Upload initrd as artifact
+    if: steps.check.outputs.available == 'false'
+    uses: actions/upload-artifact@v4
+    with:
+      name: sailfish-initrd
+      path: initrd.img
+      retention-days: 30
+
   build-hybris-boot:
-    runs-on: ubuntu-22.04
-    needs: build-docker-kernel
+  runs-on: ubuntu-22.04
+  needs: [build-docker-kernel, prepare-initrd]
 
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 1
+  steps:
+  - name: Checkout repository
+    uses: actions/checkout@v4
+    with:
+      fetch-depth: 1
 
-    - name: Download Docker kernel
-      uses: actions/download-artifact@v4
-      with:
-        name: docker-kernel-Image.gz
-        path: ./
+  - name: Download Docker kernel
+    uses: actions/download-artifact@v4
+    with:
+      name: docker-kernel-Image.gz
+      path: ./
 
-    - name: Verify kernel
-      run: |
-        ls -lh Image.gz
-        file Image.gz
+  - name: Download initrd artifact
+    uses: actions/download-artifact@v4
+    with:
+      name: sailfish-initrd
+      path: ./
 
-    - name: Download original hybris-boot.img and extract initrd (on host)
-      run: |
-        sudo apt-get update && sudo apt-get install -y abootimg
-        wget -q -O hybris-boot.img '${{ env.HYBRIS_BOOT_URL }}'
-        abootimg -x hybris-boot.img
-        ls -lh bootimg.cfg zImage initrd.img
+  - name: Verify files
+    run: |
+      ls -lh Image.gz initrd.img
+      file Image.gz
 
-    - name: Setup Docker container with Sailfish SDK
-      run: |
-        sudo docker pull coderus/sailfishos-platform-sdk-base:latest
-        sudo docker run --privileged --name sailfish-sdk -d coderus/sailfishos-platform-sdk-base:latest tail -f /dev/null
-        sleep 5
-        sudo docker exec sailfish-sdk mkdir -p /workspace
+  - name: Setup Docker container with Sailfish SDK
+    run: |
+      sudo docker pull coderus/sailfishos-platform-sdk-base:latest
+      sudo docker run --privileged --name sailfish-sdk -d coderus/sailfishos-platform-sdk-base:latest tail -f /dev/null
+      sleep 5
+      sudo docker exec sailfish-sdk mkdir -p /workspace
 
-    - name: Copy kernel and initrd into container
-      run: |
-        sudo docker cp Image.gz sailfish-sdk:/workspace/Image.gz
-        sudo docker cp initrd.img sailfish-sdk:/workspace/initrd.img
+  - name: Copy kernel and initrd into container
+    run: |
+      sudo docker cp Image.gz sailfish-sdk:/workspace/Image.gz
+      sudo docker cp initrd.img sailfish-sdk:/workspace/initrd.img
 
-    - name: Build hybris-boot-new.img with mkbootimg (in SDK)
-      run: |
-        sudo docker exec sailfish-sdk sh -c "cd /workspace && mkbootimg --kernel Image.gz --ramdisk initrd.img --base 0x00000000 --pagesize 4096 --kernel_offset 0x00008000 --ramdisk_offset 0x01000000 --tags_offset 0x00000100 --output hybris-boot-new.img && ls -lh hybris-boot-new.img"
+  - name: Build hybris-boot-new.img with mkbootimg (in SDK)
+    run: |
+      sudo docker exec sailfish-sdk sh -c "cd /workspace && mkbootimg --kernel Image.gz --ramdisk initrd.img --base 0x00000000 --pagesize 4096 --kernel_offset 0x00008000 --ramdisk_offset 0x01000000 --tags_offset 0x00000100 --output hybris-boot-new.img && ls -lh hybris-boot-new.img"
 
-    - name: Copy hybris-boot-new.img back to host
-      run: |
-        sudo docker cp sailfish-sdk:/workspace/hybris-boot-new.img ./hybris-boot-new.img
-        ls -lh hybris-boot-new.img
+  - name: Copy hybris-boot-new.img back to host
+    run: |
+      sudo docker cp sailfish-sdk:/workspace/hybris-boot-new.img ./hybris-boot-new.img
+      ls -lh hybris-boot-new.img
 
-    - name: Upload hybris-boot-new.img
-      uses: actions/upload-artifact@v4
-      with:
-        name: hybris-boot-docker.img
-        path: hybris-boot-new.img
-        retention-days: 5
+  - name: Upload hybris-boot-new.img
+    uses: actions/upload-artifact@v4
+    with:
+      name: hybris-boot-docker.img
+      path: hybris-boot-new.img
+      retention-days: 5
 
-    - name: Cleanup
-      if: always()
-      run: |
-        sudo docker stop sailfish-sdk 2>/dev/null || true
-        sudo docker rm sailfish-sdk 2>/dev/null || true
+  - name: Cleanup
+    if: always()
+    run: |
+      sudo docker stop sailfish-sdk 2>/dev/null || true
+      sudo docker rm sailfish-sdk 2>/dev/null || true
 
   build-sailfishos-image:
     runs-on: ubuntu-22.04
