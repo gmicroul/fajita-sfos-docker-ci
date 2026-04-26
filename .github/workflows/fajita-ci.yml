@@ -1,20 +1,18 @@
 name: Build SailfishOS for fajita with Docker kernel
 on:
-#  push:
-#    branches:
-#      - master
+  push:
+    branches:
+      - master
   workflow_dispatch:
-#  schedule:
-#    - cron: '0 0 * * *'
 
 env:
   DEVICE: fajita
-  VENDOR: oneplus
   RELEASE: 5.0.0.73
   PORT_ARCH: aarch64
   KERNEL_REPO: https://github.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable.git
   KERNEL_BRANCH: lineage-16.0
   HYBRIS_BOOT_URL: https://github.com/gmicroul/fajita-sfos-ci/releases/download/droid-boot/hybris-boot.img
+  CONFIG_GZ_URL: https://github.com/gmicroul/fajita-sfos-ci/releases/download/droid-boot/config.gz
 
 jobs:
   build:
@@ -29,32 +27,33 @@ jobs:
       - name: Install kernel build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential gcc-12-aarch64-linux-gnu g++-12-aarch64-linux-gnu libssl-dev bc bison flex libncurses5-dev libncurses-dev git wget curl unzip xz-utils cpio
+          sudo apt-get install -y build-essential gcc-12-aarch64-linux-gnu g++-12-aarch64-linux-gnu libssl-dev bc bison flex libncurses-dev git wget curl unzip xz-utils cpio
 
       - name: Create kernel build symlinks
         run: |
           sudo ln -sf /usr/bin/aarch64-linux-gnu-gcc-12 /usr/bin/aarch64-linux-gnu-gcc || true
           sudo ln -sf /usr/bin/aarch64-linux-gnu-g++-12 /usr/bin/aarch64-linux-gnu-g++ || true
-          aarch64-linux-gnu-gcc --version
 
       - name: Clone kernel source
         run: |
           git clone --single-branch --branch ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_REPO }} kernel_src
-          ls -la kernel_src/
 
-      - name: Download missing kernel headers
+      - name: Download device config.gz and generate defconfig
+        run: |
+          wget -q -O config.gz ${{ env.CONFIG_GZ_URL }}
+          bash scripts/generate-docker-defconfig.sh config.gz kernel_src/arch/arm64/configs/fajita_docker_defconfig
+          rm config.gz
+
+      - name: Copy missing headers from kernel source
         run: |
           cd kernel_src
-          mkdir -p include
-          # Copy headers from cloned kernel source
-          cp -f drivers/bluetooth/btfm_slim.h include/
-          cp -f drivers/bluetooth/btfm_slim_wcn3990.h include/
-          cp -f drivers/clk/qcom/mdss/mdss_pll_trace.h include/trace/
-          cp -f techpack/audio/asoc/device_event.h include/
-          # Copy ALL .h files from drivers/gpu/msm/
-          cp -f drivers/gpu/msm/*.h include/
-          # Copy camera_oneplus headers
-          cp -f drivers/media/platform/msm/camera_oneplus/cam_core/*.h include/
+          mkdir -p include include/trace include/function
+          cp -f drivers/bluetooth/btfm_slim.h include/ 2>/dev/null || true
+          cp -f drivers/bluetooth/btfm_slim_wcn3990.h include/ 2>/dev/null || true
+          cp -f drivers/clk/qcom/mdss/mdss_pll_trace.h include/trace/ 2>/dev/null || true
+          cp -f techpack/audio/asoc/device_event.h include/ 2>/dev/null || true
+          cp -f drivers/gpu/msm/*.h include/ 2>/dev/null || true
+          cp -f drivers/media/platform/msm/camera_oneplus/cam_core/*.h include/ 2>/dev/null || true
           cp -f drivers/media/platform/msm/camera_oneplus/cam_utils/*.h include/ 2>/dev/null || true
           cp -f drivers/media/platform/msm/camera_oneplus/cam_isp/isp_hw_mgr/*.h include/ 2>/dev/null || true
           cp -f drivers/media/platform/msm/camera_oneplus/cam_isp/isp_hw_mgr/hw_utils/include/*.h include/ 2>/dev/null || true
@@ -64,104 +63,61 @@ jobs:
           cp -f drivers/platform/msm/ipa/ipa_v3/ipa_trace.h include/trace/ 2>/dev/null || true
           cp -f drivers/platform/msm/ipa/ipa_clients/rndis_ipa_trace.h include/trace/ 2>/dev/null || true
           cp -f drivers/soc/qcom/tracer_pkt_private.h include/trace/ 2>/dev/null || true
-          mkdir -p include/function
           cp -f drivers/usb/gadget/function/u_ncm.h include/function/ 2>/dev/null || true
-          ls -la include/kgsl*.h include/adreno*.h include/cam*.h 2>/dev/null | wc -l
-
-      - name: Prepare defconfig
-        run: |
-          cd kernel_src
-          if [ ! -f arch/arm64/configs/fajita_defconfig ]; then
-            cp arch/arm64/configs/enchilada_defconfig arch/arm64/configs/fajita_defconfig
-          fi
-          ls -la arch/arm64/configs/fajita_defconfig
-
-      - name: Apply Docker kernel patches
-        run: |
-          cd kernel_src
-          bash ../scripts/apply-docker-kernel-patch-v2.sh
+          echo "Headers copied"
 
       - name: Build Docker kernel
         run: |
           cd kernel_src
           export ARCH=arm64
-          export SUBARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
-          export KCFLAGS="-Wno-error -fno-stack-protector"
-          export WERROR=0
-          make fajita_defconfig
-          sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/CONFIG_CC_STACKPROTECTOR_STRONG=n/g' .config || true
-          sed -i 's/CONFIG_CC_STACKPROTECTOR=y/CONFIG_CC_STACKPROTECTOR=n/g' .config || true
-          make -j$(nproc) Image.gz WERROR=0
+          make fajita_docker_defconfig
+          # 禁用 WERROR 和 stack protector（编译兼容性）
+          scripts/config --disable WERROR
+          scripts/config --disable CC_STACKPROTECTOR
+          scripts/config --disable CC_STACKPROTECTOR_STRONG
+          make -j$(nproc) Image.gz KCFLAGS="-Wno-error -fno-stack-protector" WERROR=0
           ls -la arch/arm64/boot/Image.gz
 
-      - name: Download base hybris-boot.img
+      - name: Download base hybris-boot.img and repack
         run: |
           mkdir -p boot_images
           wget -q -O boot_images/hybris-boot.img ${{ env.HYBRIS_BOOT_URL }}
-          ls -la boot_images/
-
-      - name: Repack boot.img with new kernel
-        run: |
           cd boot_images
-          if ! command -v abootimg &> /dev/null; then
-            sudo apt-get install -y abootimg
-          fi
+          sudo apt-get install -y abootimg
           abootimg -x hybris-boot.img
           cp ../kernel_src/arch/arm64/boot/Image.gz ./zImage
           abootimg --create hybris-boot-new.img -f bootimg.cfg -k zImage -r initrd.img
-          ls -la hybris-boot-new.img
           abootimg -i hybris-boot-new.img
+          ls -la hybris-boot-new.img
 
-      - name: Set up Docker container
+      - name: Set up Sailfish SDK Docker
         run: |
           sudo docker pull coderus/sailfishos-platform-sdk-base:latest
           sudo docker run --privileged --name sailfish-sdk -d coderus/sailfishos-platform-sdk-base:latest tail -f /dev/null
           sleep 5
 
-      - name: Prepare workspace in container
+      - name: Copy files to container
         run: |
           mkdir -p workspace
           cp fajita.env run-mic1.sh Jolla-@RELEASE@-fajita-@ARCH@.ks workspace/
           cp boot_images/hybris-boot-new.img workspace/hybris-boot.img
           sudo docker cp workspace sailfish-sdk:/workspace
-          ls -la workspace/
 
-      - name: Check Docker container
-        run: |
-          sudo docker exec sailfish-sdk ls -la /workspace/
-
-      - name: Run mic build inside Docker
+      - name: Run mic build
         run: |
           sudo docker exec sailfish-sdk sh -c "cd /workspace && source ./fajita.env && sudo bash ./run-mic1.sh"
 
-      - name: Find build output
-        run: |
-          echo "=== Checking build output ==="
-          sudo docker exec sailfish-sdk ls -la /workspace/
-          sudo docker exec sailfish-sdk find /workspace -name "*.zip" 2>/dev/null || true
-          sudo docker exec sailfish-sdk find /workspace -name "sfe-*" -type d 2>/dev/null || true
-
-      - name: Archive artifacts
+      - name: Collect artifacts
         run: |
           sudo mkdir -p artifacts/
-          OUTPUT_DIR=$(sudo docker exec sailfish-sdk ls /workspace/ | grep sfe- | head -1)
-          if [ -n "$OUTPUT_DIR" ]; then
-            # Docker cp 不支持通配符，需要先找到确切路径
-            ZIP_FILE=$(sudo docker exec sailfish-sdk find /workspace/$OUTPUT_DIR -name "sailfishos-*.zip" -type f 2>/dev/null | head -1)
-            if [ -n "$ZIP_FILE" ]; then
-              sudo docker cp sailfish-sdk:$ZIP_FILE artifacts/
-            fi
-          fi
           sudo cp boot_images/hybris-boot-new.img artifacts/
+          # 找 mic 生成的 zip
+          ZIP_FILE=$(sudo docker exec sailfish-sdk find /workspace -name "sailfishos-*.zip" -type f 2>/dev/null | head -1)
+          if [ -n "$ZIP_FILE" ]; then
+            sudo docker cp sailfish-sdk:$ZIP_FILE artifacts/
+          fi
           ls -la artifacts/
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: sailfishos-fajita-5.0.0.73-docker-kernel
-          path: artifacts/*.zip
-          retention-days: 5
 
       - name: Upload hybris-boot.img
         uses: actions/upload-artifact@v4
@@ -170,9 +126,15 @@ jobs:
           path: artifacts/hybris-boot-new.img
           retention-days: 5
 
+      - name: Upload flashable zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: sailfishos-fajita-docker-kernel
+          path: artifacts/sailfishos-*.zip
+          retention-days: 5
+
       - name: Cleanup
         if: always()
         run: |
           sudo docker stop sailfish-sdk 2>/dev/null || true
           sudo docker rm sailfish-sdk 2>/dev/null || true
-          rm -rf workspace kernel_src boot_images
