@@ -100,6 +100,8 @@ jobs:
           # mkbootimg 在 host 的 Ubuntu 上有
           sudo docker exec sailfish-sdk bash /home/build/build-hybris-boot.sh /home/build/Image.gz-dtb /home/build/hybris-boot.img 2>&1 || true
 
+          mkdir -p output
+
           # 如果容器里没有 mkbootimg，我们手动在 host 上做
           # 先把 initramfs.gz 拷出来
           sudo docker cp sailfish-sdk:/tmp/hybris-initramfs.gz build/initramfs.gz 2>/dev/null || true
