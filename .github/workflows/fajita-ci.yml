@@ -77,8 +77,24 @@ jobs:
           scripts/config --disable CC_STACKPROTECTOR
           scripts/config --disable CC_STACKPROTECTOR_STRONG
           make olddefconfig
-          make -j$(nproc) Image.gz-dtb KCFLAGS="-Wno-error -fno-stack-protector" WERROR=0
-          ls -la arch/arm64/boot/Image.gz-dtb
+          make -j$(nproc) Image.gz KCFLAGS="-Wno-error -fno-stack-protector" WERROR=0
+          ls -la arch/arm64/boot/Image.gz
+
+      - name: Append DTB from TWRP stock image
+        run: |
+          wget -q -O twrp-Image.gz-dtb "https://github.com/mauronofrio/android_device_oneplus_fajita_TWRP/raw/refs/heads/android-9.0/prebuilt/Image.gz-dtb"
+          # 找到 DTB 魔数位置，截取 DTB 部分
+          DTB_OFFSET=$(od -A d -t x1 twrp-Image.gz-dtb | grep 'd0 0d fe ed' | head -1 | awk '{print $1}')
+          if [ -n "$DTB_OFFSET" ] && [ "$DTB_OFFSET" -gt 0 ]; then
+            tail -c +$((DTB_OFFSET)) twrp-Image.gz-dtb > dtb_part
+            # 拼接到编译的 Image.gz
+            cat kernel_src/arch/arm64/boot/Image.gz dtb_part > kernel_src/arch/arm64/boot/Image.gz-dtb
+            echo "DTB appended from TWRP image"
+          else
+            echo "Failed to find DTB offset, using Image.gz as-is"
+            cp kernel_src/arch/arm64/boot/Image.gz kernel_src/arch/arm64/boot/Image.gz-dtb
+          fi
+          ls -la kernel_src/arch/arm64/boot/Image.gz-dtb
 
       - name: Download base hybris-boot.img and repack
         run: |
