@@ -11,8 +11,8 @@ env:
   PORT_ARCH: aarch64
   KERNEL_REPO: https://github.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable.git
   KERNEL_BRANCH: lineage-16.0
-  HYBRIS_BOOT_URL: https://github.com/gmicroul/fajita-sfos-ci/releases/download/droid-boot/hybris-boot.img
   CONFIG_GZ_URL: https://github.com/gmicroul/fajita-sfos-ci/releases/download/droid-boot/config.gz
+  DTB_URL: https://github.com/gmicroul/fajita-sfos-ci/releases/download/droid-boot/sfos-dtb-single
 
 jobs:
   build:
@@ -27,7 +27,7 @@ jobs:
       - name: Install kernel build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential gcc-12-aarch64-linux-gnu g++-12-aarch64-linux-gnu libssl-dev bc bison flex libncurses-dev git wget curl unzip xz-utils cpio
+          sudo apt-get install -y build-essential gcc-12-aarch64-linux-gnu g++-12-aarch64-linux-gnu libssl-dev bc bison flex libncurses-dev git wget curl xz-utils cpio
 
       - name: Create kernel build symlinks
         run: |
@@ -66,36 +66,21 @@ jobs:
           cp -f drivers/usb/gadget/function/u_ncm.h include/function/ 2>/dev/null || true
           echo "Headers copied"
 
-      - name: Build Docker kernel
+- name: Build Docker kernel
         run: |
           cd kernel_src
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           make fajita_docker_defconfig
-          # 禁用 WERROR 和 stack protector，然后重新解析依赖
           scripts/config --disable WERROR
           scripts/config --disable CC_STACKPROTECTOR
           scripts/config --disable CC_STACKPROTECTOR_STRONG
           make olddefconfig
           make -j$(nproc) Image.gz KCFLAGS="-Wno-error -fno-stack-protector" WERROR=0
-          ls -la arch/arm64/boot/Image.gz
-
-      - name: Append DTB from Sailfish OS stock image
-        run: |
-          wget -q -O sfos-dtb-single "https://github.com/gmicroul/fajita-sfos-ci/releases/download/droid-boot/sfos-dtb-single"
-          cat kernel_src/arch/arm64/boot/Image.gz sfos-dtb-single > kernel_src/arch/arm64/boot/Image.gz-dtb
-
-      - name: Download base hybris-boot.img and repack
-        run: |
-          mkdir -p boot_images
-          wget -q -O boot_images/hybris-boot.img ${{ env.HYBRIS_BOOT_URL }}
-          cd boot_images
-          sudo apt-get install -y abootimg
-          abootimg -x hybris-boot.img
-          cp ../kernel_src/arch/arm64/boot/Image.gz-dtb ./zImage
-          abootimg --create hybris-boot-new.img -f bootimg.cfg -k zImage -r initrd.img
-          abootimg -i hybris-boot-new.img
-          ls -la hybris-boot-new.img
+          # 下载 DTB 并拼接到 Image.gz
+          wget -q -O dtb ${{ env.DTB_URL }}
+          cat arch/arm64/boot/Image.gz dtb > arch/arm64/boot/Image.gz-dtb
+          ls -la arch/arm64/boot/Image.gz-dtb
 
       - name: Set up Sailfish SDK Docker
         run: |
@@ -103,11 +88,24 @@ jobs:
           sudo docker run --privileged --name sailfish-sdk -d coderus/sailfishos-platform-sdk-base:latest tail -f /dev/null
           sleep 5
 
-      - name: Copy files to container
+      - name: Build hybris-boot.img in SDK
+        run: |
+          # 把内核和脚本复制进 SDK 容器
+          mkdir -p build
+          cp kernel_src/arch/arm64/boot/Image.gz-dtb build/
+          cp scripts/build-hybris-boot.sh build/
+          sudo docker cp build sailfish-sdk:/home/
+          # 在容器里构建
+          sudo docker exec sailfish-sdk bash /home/build/build-hybris-boot.sh /home/build/Image.gz-dtb /home/build/hybris-boot.img
+          # 复制出来
+          mkdir -p output
+          sudo docker cp sailfish-sdk:/home/build/hybris-boot.img output/
+
+      - name: Copy files for mic build
         run: |
           mkdir -p workspace
           cp fajita.env run-mic1.sh Jolla-@RELEASE@-fajita-@ARCH@.ks workspace/
-          cp boot_images/hybris-boot-new.img workspace/hybris-boot.img
+          cp output/hybris-boot.img workspace/
           sudo docker cp workspace sailfish-sdk:/workspace
 
       - name: Run mic build
@@ -117,8 +115,7 @@ jobs:
       - name: Collect artifacts
         run: |
           sudo mkdir -p artifacts/
-          sudo cp boot_images/hybris-boot-new.img artifacts/
-          # 找 mic 生成的 zip
+          sudo cp output/hybris-boot.img artifacts/
           ZIP_FILE=$(sudo docker exec sailfish-sdk find /workspace -name "sailfishos-*.zip" -type f 2>/dev/null | head -1)
           if [ -n "$ZIP_FILE" ]; then
             sudo docker cp sailfish-sdk:$ZIP_FILE artifacts/
@@ -129,7 +126,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: hybris-boot-docker-kernel
-          path: artifacts/hybris-boot-new.img
+          path: artifacts/hybris-boot.img
           retention-days: 5
 
       - name: Upload flashable zip
