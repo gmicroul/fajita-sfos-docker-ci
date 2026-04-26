@@ -27,7 +27,7 @@ jobs:
       - name: Install kernel build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential gcc-12-aarch64-linux-gnu g++-12-aarch64-linux-gnu libssl-dev bc bison flex libncurses-dev git wget curl xz-utils cpio mkbootimg
+          sudo apt-get install -y build-essential gcc-12-aarch64-linux-gnu g++-12-aarch64-linux-gnu libssl-dev bc bison flex libncurses-dev git wget curl xz-utils cpio
 
       - name: Create kernel build symlinks
         run: |
@@ -77,97 +77,30 @@ jobs:
           scripts/config --disable CC_STACKPROTECTOR_STRONG
           make olddefconfig
           make -j$(nproc) Image.gz KCFLAGS="-Wno-error -fno-stack-protector" WERROR=0
-          # 下载 DTB 并拼接到 Image.gz
           wget -q -O dtb ${{ env.DTB_URL }}
           cat arch/arm64/boot/Image.gz dtb > arch/arm64/boot/Image.gz-dtb
           ls -la arch/arm64/boot/Image.gz-dtb
 
       - name: Set up Sailfish SDK Docker
         run: |
-          sudo docker pull coderus/sailfishos-platform-sdk-base:latest
-          sudo docker run --privileged --name sailfish-sdk -d coderus/sailfishos-platform-sdk-base:latest tail -f /dev/null
+          sudo docker pull coderus/sailfishos-platform-sdk:latest
+          sudo docker run --privileged --name sailfish-sdk -d coderus/sailfishos-platform-sdk:latest tail -f /dev/null
           sleep 5
 
-      - name: Build hybris-boot.img
+      - name: Build hybris-boot.img in SDK
         run: |
-          # 拷贝 hybris-boot 源码和生成脚本到 SDK 容器
           mkdir -p build
           cp kernel_src/arch/arm64/boot/Image.gz-dtb build/
           cp scripts/build-hybris-boot.sh build/
           sudo docker cp build sailfish-sdk:/home/
-
-          # 在 SDK 容器里只做 initramfs（sed + fixup-mountpoints + cpio）
-          # mkbootimg 在 host 的 Ubuntu 上有
-          sudo docker exec sailfish-sdk bash /home/build/build-hybris-boot.sh /home/build/Image.gz-dtb /home/build/hybris-boot.img 2>&1 || true
-
-          mkdir -p output
-
-          # 如果容器里没有 mkbootimg，我们手动在 host 上做
-          # 先把 initramfs.gz 拷出来
-          sudo docker cp sailfish-sdk:/tmp/hybris-initramfs.gz build/initramfs.gz 2>/dev/null || true
-          if [ -f build/initramfs.gz ]; then
-            echo "使用 SDK 生成的 initramfs 在 host 上打包"
-            mkbootimg \
-              --kernel kernel_src/arch/arm64/boot/Image.gz-dtb \
-              --ramdisk build/initramfs.gz \
-              --cmdline 'androidboot.hardware=qcom androidboot.console=ttyMSM0 video=vfb:640x400,bpp=32,memsize=3072000 msm_rtb.filter=0x237 ehci-hcd.park=3 lpm_levels.sleep_disabled=1 service_locator.enable=1 swiotlb=2048 androidboot.configfs=true androidboot.usbcontroller=a600000.dwc3 firmware_class.path=/vendor/firmware_mnt/image loop.max_part=7 selinux=0' \
-              --base 0x80000000 \
-              --pagesize 4096 \
-              --kernel_offset 0x00008000 \
-              --ramdisk_offset 0x01000000 \
-              --second_offset 0x00f00000 \
-              --tags_offset 0x00000100 \
-              --output output/hybris-boot.img
-          else
-            echo "initramfs 生成失败，用 mkernel 直接 mkbootimg"
-            mkbootimg \
-              --kernel kernel_src/arch/arm64/boot/Image.gz-dtb \
-              --ramdisk /dev/null \
-              --cmdline 'androidboot.hardware=qcom androidboot.console=ttyMSM0 video=vfb:640x400,bpp=32,memsize=3072000 msm_rtb.filter=0x237 ehci-hcd.park=3 lpm_levels.sleep_disabled=1 service_locator.enable=1 swiotlb=2048 androidboot.configfs=true androidboot.usbcontroller=a600000.dwc3 firmware_class.path=/vendor/firmware_mnt/image loop.max_part=7 selinux=0' \
-              --base 0x80000000 \
-              --pagesize 4096 \
-              --kernel_offset 0x00008000 \
-              --ramdisk_offset 0x01000000 \
-              --second_offset 0x00f00000 \
-              --tags_offset 0x00000100 \
-              --output output/hybris-boot.img
-          fi
-          mkdir -p output
-          ls -la output/
-
-      - name: Copy files for mic build
-        run: |
-          mkdir -p workspace
-          cp fajita.env run-mic1.sh Jolla-@RELEASE@-fajita-@ARCH@.ks workspace/
-          cp output/hybris-boot.img workspace/
-          sudo docker cp workspace sailfish-sdk:/workspace
-
-      - name: Run mic build
-        run: |
-          sudo docker exec sailfish-sdk sh -c "cd /workspace && source ./fajita.env && sudo bash ./run-mic1.sh"
-
-      - name: Collect artifacts
-        run: |
-          sudo mkdir -p artifacts/
-          sudo cp output/hybris-boot.img artifacts/
-          ZIP_FILE=$(sudo docker exec sailfish-sdk find /workspace -name "sailfishos-*.zip" -type f 2>/dev/null | head -1)
-          if [ -n "$ZIP_FILE" ]; then
-            sudo docker cp sailfish-sdk:$ZIP_FILE artifacts/
-          fi
-          ls -la artifacts/
+          sudo docker exec sailfish-sdk bash /home/build/build-hybris-boot.sh /home/build/Image.gz-dtb /home/build/hybris-boot.img
+          sudo docker cp sailfish-sdk:/home/build/hybris-boot.img output/
 
       - name: Upload hybris-boot.img
         uses: actions/upload-artifact@v4
         with:
           name: hybris-boot-docker-kernel
-          path: artifacts/hybris-boot.img
-          retention-days: 5
-
-      - name: Upload flashable zip
-        uses: actions/upload-artifact@v4
-        with:
-          name: sailfishos-fajita-docker-kernel
-          path: artifacts/sailfishos-*.zip
+          path: output/hybris-boot.img
           retention-days: 5
 
       - name: Cleanup
