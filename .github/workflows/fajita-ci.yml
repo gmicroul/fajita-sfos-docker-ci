@@ -72,12 +72,13 @@ jobs:
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           make fajita_docker_defconfig
-          # 禁用 WERROR 和 stack protector（编译兼容性）
+          # 禁用 WERROR 和 stack protector，然后重新解析依赖
           scripts/config --disable WERROR
           scripts/config --disable CC_STACKPROTECTOR
           scripts/config --disable CC_STACKPROTECTOR_STRONG
-          make -j$(nproc) Image.gz KCFLAGS="-Wno-error -fno-stack-protector" WERROR=0
-          ls -la arch/arm64/boot/Image.gz
+          make olddefconfig
+          make -j$(nproc) Image.gz-dtb KCFLAGS="-Wno-error -fno-stack-protector" WERROR=0
+          ls -la arch/arm64/boot/Image.gz-dtb
 
       - name: Download base hybris-boot.img and repack
         run: |
@@ -86,7 +87,7 @@ jobs:
           cd boot_images
           sudo apt-get install -y abootimg
           abootimg -x hybris-boot.img
-          cp ../kernel_src/arch/arm64/boot/Image.gz ./zImage
+          cp ../kernel_src/arch/arm64/boot/Image.gz-dtb ./zImage
           abootimg --create hybris-boot-new.img -f bootimg.cfg -k zImage -r initrd.img
           abootimg -i hybris-boot-new.img
           ls -la hybris-boot-new.img
