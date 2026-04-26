@@ -80,12 +80,10 @@ jobs:
           make -j$(nproc) Image.gz KCFLAGS="-Wno-error -fno-stack-protector" WERROR=0
           ls -la arch/arm64/boot/Image.gz
 
-      - name: Append DTB from TWRP stock image
+      - name: Append DTB from Sailfish OS stock image
         run: |
-          # 从实体机的 hybris-boot.img 里提取 dtb 并上传到了 release
-          wget -q -O sfos-dtb-part "https://github.com/gmicroul/fajita-sfos-ci/releases/download/droid-boot/sfos-dtb-part"
-          cat kernel_src/arch/arm64/boot/Image.gz sfos-dtb-part > kernel_src/arch/arm64/boot/Image.gz-dtb
-          ls -la kernel_src/arch/arm64/boot/Image.gz-dtb
+          wget -q -O sfos-dtb-single "https://github.com/gmicroul/fajita-sfos-ci/releases/download/droid-boot/sfos-dtb-single"
+          cat kernel_src/arch/arm64/boot/Image.gz sfos-dtb-single > kernel_src/arch/arm64/boot/Image.gz-dtb
 
       - name: Download base hybris-boot.img and repack
         run: |
