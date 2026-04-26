@@ -17,13 +17,13 @@ fi
 
 echo "=== 构建 hybris-boot.img for $DEVICE ==="
 echo "内核: $IMAGE_GZ_DTB"
-echo "PATH: $PATH"
-which mkbootimg
 
 WORKDIR=$(mktemp -d)
 cd "$WORKDIR"
 
 zypper -n install -y git android-tools-mkbootimg busybox 2>/dev/null || true
+echo "已安装依赖"
+command -v mkbootimg && echo "mkbootimg OK" || echo "mkbootimg MISSING"
 git clone --depth 1 https://github.com/mer-hybris/hybris-boot.git
 cd hybris-boot
 
