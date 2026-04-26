@@ -87,18 +87,40 @@ jobs:
           sudo docker run --privileged --name sailfish-sdk -d coderus/sailfishos-platform-sdk:latest tail -f /dev/null
           sleep 5
 
-      - name: Build hybris-boot.img in SDK
+      - name: Build hybris-boot.img
         run: |
           mkdir -p build output
           cp kernel_src/arch/arm64/boot/Image.gz-dtb build/
           cp scripts/build-hybris-boot.sh build/
           sudo docker cp build sailfish-sdk:/home/
           sudo docker exec sailfish-sdk bash /home/build/build-hybris-boot.sh
-          # 从 SDK 拷出 initramfs，在 host 用 mkbootimg 打包
-          sudo docker cp sailfish-sdk:/tmp/hybris-initramfs.gz build/
+          # 从 SDK 拷出 initramfs (不含 busybox)
+          sudo docker cp sailfish-sdk:/tmp/hybris-initramfs-no-busybox.gz build/
+
+          # 在 host 上静态编译 arm64 busybox
+          wget -q -O busybox.tar.bz2 "https://busybox.net/downloads/busybox-1.36.1.tar.bz2" || \
+          wget -q -O busybox.tar.bz2 "https://gh-proxy.com/https://busybox.net/downloads/busybox-1.36.1.tar.bz2"
+          tar xf busybox.tar.bz2
+          cd busybox-1.36.1
+          make defconfig
+          # 关键：静态链接
+          sed -i 's/# CONFIG_STATIC is not set/CONFIG_STATIC=y/' .config
+          make -j$(nproc) CROSS_COMPILE=aarch64-linux-gnu- CONFIG_EXTRA_CFLAGS="-static"
+          cd ..
+          echo "busybox arm64: $(file busybox-1.36.1/busybox)"
+
+          # 解压 initramfs，替换 busybox，重新打包
+          mkdir -p build/ramdisk
+          cd build/ramdisk
+          zcat ../hybris-initramfs-no-busybox.gz | cpio -idm 2>/dev/null
+          cp ../../busybox-1.36.1/busybox bin/busybox
+          chmod +x bin/busybox
+          find . | cpio -H newc -o 2>/dev/null | gzip -9 > ../hybris-initramfs.gz
+          cd ..
+
           mkbootimg \
-            --kernel kernel_src/arch/arm64/boot/Image.gz-dtb \
-            --ramdisk build/hybris-initramfs.gz \
+            --kernel ../kernel_src/arch/arm64/boot/Image.gz-dtb \
+            --ramdisk hybris-initramfs.gz \
             --cmdline 'androidboot.hardware=qcom androidboot.console=ttyMSM0 video=vfb:640x400,bpp=32,memsize=3072000 msm_rtb.filter=0x237 ehci-hcd.park=3 lpm_levels.sleep_disabled=1 service_locator.enable=1 swiotlb=2048 androidboot.configfs=true androidboot.usbcontroller=a600000.dwc3 firmware_class.path=/vendor/firmware_mnt/image loop.max_part=7 selinux=0' \
             --base 0x80000000 \
             --pagesize 4096 \
@@ -106,7 +128,7 @@ jobs:
             --ramdisk_offset 0x01000000 \
             --second_offset 0x00f00000 \
             --tags_offset 0x00000100 \
-            --output output/hybris-boot.img
+            --output ../output/hybris-boot.img
 
       - name: Upload hybris-boot.img
         uses: actions/upload-artifact@v4
