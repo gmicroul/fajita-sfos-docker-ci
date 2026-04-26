@@ -1,12 +1,13 @@
 #!/bin/bash
-# build-hybris-boot.sh - 在 Sailfish SDK 中生成 hybris-boot.img
+# build-hybris-boot.sh - 在 Sailfish SDK 中完整生成 hybris-boot.img
 # 用法: bash build-hybris-boot.sh <Image.gz-dtb> <output-boot-img>
 
 set -e
+export PATH="/usr/bin:/usr/sbin:$PATH"
 
 IMAGE_GZ_DTB="$1"
 OUTPUT="$2"
-DEVICE="fajita"
+DEVICE="${DEVICE:-fajita}"
 DATA_PART="/dev/sda17"
 
 if [ ! -f "$IMAGE_GZ_DTB" ]; then
@@ -16,17 +17,16 @@ fi
 
 echo "=== 构建 hybris-boot.img for $DEVICE ==="
 echo "内核: $IMAGE_GZ_DTB"
-echo "DATA_PART: $DATA_PART"
+echo "PATH: $PATH"
+which mkbootimg
 
 WORKDIR=$(mktemp -d)
 cd "$WORKDIR"
 
-# 下载 hybris-boot 源码
-zypper -n install -y git 2>/dev/null || true
+zypper -n install -y git android-tools-mkbootimg busybox 2>/dev/null || true
 git clone --depth 1 https://github.com/mer-hybris/hybris-boot.git
 cd hybris-boot
 
-# 生成 init 脚本
 sed -e "s|%DATA_PART%|$DATA_PART|g" \
     -e 's|%BOOTLOGO%|1|g' \
     -e 's|%NEVERBOOT%|0|g' \
@@ -34,26 +34,15 @@ sed -e "s|%DATA_PART%|$DATA_PART|g" \
     init-script > initramfs/init
 chmod +x initramfs/init
 
-# 运行 fixup-mountpoints
 bash fixup-mountpoints "$DEVICE" initramfs/init
-echo "init 脚本已生成并 fixup"
+echo "init fixup done"
 
-# busybox
-if [ -f /usr/bin/busybox ]; then
-    cp /usr/bin/busybox initramfs/bin/busybox
-elif [ -f /bin/busybox ]; then
-    cp /bin/busybox initramfs/bin/busybox
-else
-    zypper -n install -y busybox 2>/dev/null || true
-    cp /usr/bin/busybox initramfs/bin/busybox 2>/dev/null || cp /bin/busybox initramfs/bin/busybox 2>/dev/null || true
-fi
+cp /usr/bin/busybox initramfs/bin/busybox 2>/dev/null || cp /bin/busybox initramfs/bin/busybox 2>/dev/null || true
 chmod +x initramfs/bin/busybox 2>/dev/null || true
 
-# 打包 initramfs
 (cd initramfs && find . | cpio -H newc -o 2>/dev/null | gzip -9 > "$WORKDIR/initramfs.gz")
 echo "initramfs: $(ls -la $WORKDIR/initramfs.gz)"
 
-# mkbootimg
 mkbootimg \
     --kernel "$IMAGE_GZ_DTB" \
     --ramdisk "$WORKDIR/initramfs.gz" \

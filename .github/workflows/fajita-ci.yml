@@ -89,7 +89,7 @@ jobs:
 
       - name: Build hybris-boot.img in SDK
         run: |
-          mkdir -p build
+          mkdir -p build output
           cp kernel_src/arch/arm64/boot/Image.gz-dtb build/
           cp scripts/build-hybris-boot.sh build/
           sudo docker cp build sailfish-sdk:/home/
