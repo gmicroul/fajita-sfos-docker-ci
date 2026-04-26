@@ -66,7 +66,7 @@ jobs:
           cp -f drivers/usb/gadget/function/u_ncm.h include/function/ 2>/dev/null || true
           echo "Headers copied"
 
-- name: Build Docker kernel
+      - name: Build Docker kernel
         run: |
           cd kernel_src
           export ARCH=arm64
