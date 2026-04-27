@@ -76,10 +76,11 @@ jobs:
           scripts/config --disable CC_STACKPROTECTOR
           scripts/config --disable CC_STACKPROTECTOR_STRONG
           make olddefconfig
-          # 设置 append 的 dtb 名称（需要的是路径里不带 .dtb 后缀的名字）
-          scripts/config --set-str BUILD_ARM64_APPENDED_DTB_IMAGE_NAMES "sdm845-v2.1"
-          make olddefconfig
-          make -j$(nproc) Image.gz-dtb KCFLAGS="-Wno-error -fno-stack-protector" WERROR=0
+          # 先 make dtbs 编译设备树，再从三个 dtb 中选 v2.1 拼接到内核
+          # 用 QCDT header 格式（三个一起）或直接用 v2.1
+          make -j$(nproc) Image.gz dtbs KCFLAGS="-Wno-error -fno-stack-protector" WERROR=0
+          # 拼接 v2.1 dtb
+          cat arch/arm64/boot/Image.gz arch/arm64/boot/dts/qcom/sdm845-v2.1.dtb > arch/arm64/boot/Image.gz-dtb
           ls -la arch/arm64/boot/Image.gz-dtb
 
       - name: Set up Sailfish SDK Docker
