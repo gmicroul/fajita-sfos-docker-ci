@@ -39,7 +39,7 @@ jobs:
           sudo docker cp _build sailfish-sdk:/home/build/
           
           # 在 SDK 里完成一切
-          sudo docker exec -e DEVICE=fajita \
+          sudo docker exec -u root -e DEVICE=fajita \
             -e KERNEL_REPO="${{ env.KERNEL_REPO }}" \
             -e KERNEL_BRANCH="${{ env.KERNEL_BRANCH }}" \
             -e CONFIG_GZ_URL="${{ env.CONFIG_GZ_URL }}" \
