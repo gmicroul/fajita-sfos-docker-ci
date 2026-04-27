@@ -49,7 +49,7 @@ jobs:
             cd /home/build
 
             # 安装依赖
-            zypper -n install -y git cross-aarch64-gcc10 bc bison flex make curl cpio
+            zypper -n install -y git bc bison flex make curl cpio
 
             # clone 内核
             git clone --single-branch --branch $KERNEL_BRANCH $KERNEL_REPO kernel_src
