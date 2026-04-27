@@ -8,11 +8,10 @@ on:
 env:
   DEVICE: fajita
   RELEASE: 5.0.0.73
-  PORT_ARCH: aarch64
   KERNEL_REPO: https://github.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable.git
   KERNEL_BRANCH: lineage-16.0
   CONFIG_GZ_URL: https://github.com/gmicroul/fajita-sfos-ci/releases/download/droid-boot/config.gz
-  DTB_URL: https://github.com/gmicroul/fajita-sfos-ci/releases/download/droid-boot/sfos-dtb-single
+  BUSYBOX_URL: https://github.com/gmicroul/fajita-sfos-ci/releases/download/droid-boot/busybox
 
 jobs:
   build:
@@ -24,91 +23,70 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Install kernel build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential gcc-12-aarch64-linux-gnu g++-12-aarch64-linux-gnu libssl-dev bc bison flex libncurses-dev git wget curl xz-utils cpio mkbootimg
-
-      - name: Create kernel build symlinks
-        run: |
-          sudo ln -sf /usr/bin/aarch64-linux-gnu-gcc-12 /usr/bin/aarch64-linux-gnu-gcc || true
-          sudo ln -sf /usr/bin/aarch64-linux-gnu-g++-12 /usr/bin/aarch64-linux-gnu-g++ || true
-
-      - name: Clone kernel source
-        run: |
-          git clone --single-branch --branch ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_REPO }} kernel_src
-
-      - name: Download device config.gz and generate defconfig
-        run: |
-          wget -q -O config.gz ${{ env.CONFIG_GZ_URL }}
-          bash scripts/generate-docker-defconfig.sh config.gz kernel_src/arch/arm64/configs/fajita_docker_defconfig
-          rm config.gz
-
-      - name: Copy missing headers from kernel source
-        run: |
-          cd kernel_src
-          mkdir -p include include/trace include/function
-          cp -f drivers/bluetooth/btfm_slim.h include/ 2>/dev/null || true
-          cp -f drivers/bluetooth/btfm_slim_wcn3990.h include/ 2>/dev/null || true
-          cp -f drivers/clk/qcom/mdss/mdss_pll_trace.h include/trace/ 2>/dev/null || true
-          cp -f techpack/audio/asoc/device_event.h include/ 2>/dev/null || true
-          cp -f drivers/gpu/msm/*.h include/ 2>/dev/null || true
-          cp -f drivers/media/platform/msm/camera_oneplus/cam_core/*.h include/ 2>/dev/null || true
-          cp -f drivers/media/platform/msm/camera_oneplus/cam_utils/*.h include/ 2>/dev/null || true
-          cp -f drivers/media/platform/msm/camera_oneplus/cam_isp/isp_hw_mgr/*.h include/ 2>/dev/null || true
-          cp -f drivers/media/platform/msm/camera_oneplus/cam_isp/isp_hw_mgr/hw_utils/include/*.h include/ 2>/dev/null || true
-          cp -f drivers/media/platform/msm/camera_oneplus/cam_req_mgr/*.h include/ 2>/dev/null || true
-          cp -f drivers/media/platform/msm/camera_oneplus/cam_sensor_module/cam_sensor_utils/*.h include/ 2>/dev/null || true
-          cp -f drivers/media/platform/msm/camera_oneplus/cam_sync/*.h include/ 2>/dev/null || true
-          cp -f drivers/platform/msm/ipa/ipa_v3/ipa_trace.h include/trace/ 2>/dev/null || true
-          cp -f drivers/platform/msm/ipa/ipa_clients/rndis_ipa_trace.h include/trace/ 2>/dev/null || true
-          cp -f drivers/soc/qcom/tracer_pkt_private.h include/trace/ 2>/dev/null || true
-          cp -f drivers/usb/gadget/function/u_ncm.h include/function/ 2>/dev/null || true
-          echo "Headers copied"
-
-      - name: Build Docker kernel
-        run: |
-          cd kernel_src
-          export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          make fajita_docker_defconfig
-          scripts/config --disable WERROR
-          scripts/config --disable CC_STACKPROTECTOR
-          scripts/config --disable CC_STACKPROTECTOR_STRONG
-          make olddefconfig
-          # 先 make dtbs 编译设备树，再从三个 dtb 中选 v2.1 拼接到内核
-          # 用 QCDT header 格式（三个一起）或直接用 v2.1
-          make -j$(nproc) Image.gz dtbs KCFLAGS="-Wno-error -fno-stack-protector" WERROR=0
-          # 拼接 v2.1 dtb
-          cat arch/arm64/boot/Image.gz arch/arm64/boot/dts/qcom/sdm845-v2.1.dtb > arch/arm64/boot/Image.gz-dtb
-          ls -la arch/arm64/boot/Image.gz-dtb
-
       - name: Set up Sailfish SDK Docker
         run: |
           sudo docker pull coderus/sailfishos-platform-sdk:latest
           sudo docker run --privileged --name sailfish-sdk -d coderus/sailfishos-platform-sdk:latest tail -f /dev/null
           sleep 5
+          sudo docker exec sailfish-sdk gcc --version
 
-      - name: Build hybris-boot.img
+      - name: Build kernel and hybris-boot in SDK
         run: |
-          mkdir -p build output
-          cp kernel_src/arch/arm64/boot/Image.gz-dtb build/
-          cp scripts/build-hybris-boot.sh build/
-          sudo docker cp build sailfish-sdk:/home/
-          sudo docker exec sailfish-sdk bash /home/build/build-hybris-boot.sh
-          # 从 SDK 拷出 initramfs，host 打包
-          sudo docker cp sailfish-sdk:/tmp/hybris-initramfs.gz build/
-          mkbootimg \
-            --kernel kernel_src/arch/arm64/boot/Image.gz-dtb \
-            --ramdisk build/hybris-initramfs.gz \
-            --cmdline 'androidboot.hardware=qcom androidboot.console=ttyMSM0 video=vfb:640x400,bpp=32,memsize=3072000 msm_rtb.filter=0x237 ehci-hcd.park=3 lpm_levels.sleep_disabled=1 service_locator.enable=1 swiotlb=2048 androidboot.configfs=true androidboot.usbcontroller=a600000.dwc3 firmware_class.path=/vendor/firmware_mnt/image loop.max_part=7 selinux=0' \
-            --base 0x80000000 \
-            --pagesize 4096 \
-            --kernel_offset 0x00008000 \
-            --ramdisk_offset 0x01000000 \
-            --second_offset 0x00f00000 \
-            --tags_offset 0x00000100 \
-            --output output/hybris-boot.img
+          # 上传所有需要的文件
+          mkdir -p _build
+          cp scripts/generate-docker-defconfig.sh _build/
+          cp scripts/build-hybris-boot.sh _build/
+          sudo docker cp _build sailfish-sdk:/home/build/
+          
+          # 在 SDK 里完成一切
+          sudo docker exec -e DEVICE=fajita \
+            -e KERNEL_REPO="${{ env.KERNEL_REPO }}" \
+            -e KERNEL_BRANCH="${{ env.KERNEL_BRANCH }}" \
+            -e CONFIG_GZ_URL="${{ env.CONFIG_GZ_URL }}" \
+            -e BUSYBOX_URL="${{ env.BUSYBOX_URL }}" \
+            sailfish-sdk bash -c '
+            set -e
+            cd /home/build
+
+            # 安装依赖
+            zypper -n install -y git cross-aarch64-gcc10 bc bison flex make curl cpio
+
+            # clone 内核
+            git clone --single-branch --branch $KERNEL_BRANCH $KERNEL_REPO kernel_src
+
+            # 下载 config.gz 生成 defconfig
+            curl -L -o config.gz "$CONFIG_GZ_URL"
+            bash generate-docker-defconfig.sh config.gz kernel_src/arch/arm64/configs/fajita_docker_defconfig
+
+            # 补头文件
+            cd kernel_src
+            mkdir -p include include/trace include/function
+            for d in drivers/bluetooth drivers/clk/qcom/mdss techpack/audio/asoc drivers/gpu/msm drivers/media/platform/msm/camera_oneplus/cam_core drivers/media/platform/msm/camera_oneplus/cam_utils drivers/media/platform/msm/camera_oneplus/cam_isp/isp_hw_mgr drivers/media/platform/msm/camera_oneplus/cam_req_mgr drivers/media/platform/msm/camera_oneplus/cam_sync drivers/platform/msm/ipa/ipa_v3 drivers/soc/qcom drivers/usb/gadget/function; do
+              find $d -name "*.h" -exec cp {} include/ \; 2>/dev/null || true
+            done
+            echo "headers done"
+
+            # 编译
+            export ARCH=arm64
+            export CROSS_COMPILE=aarch64-meego-linux-gnu-
+            make fajita_docker_defconfig
+            # 注意 SDK 里是 cc_stack_protector 不是 cc-stack-protector
+            scripts/config --disable WERROR
+            scripts/config --disable CC_STACKPROTECTOR 2>/dev/null || true
+            scripts/config --disable CC_STACKPROTECTOR_STRONG 2>/dev/null || true
+            make olddefconfig
+            make -j$(nproc) Image.gz dtbs KCFLAGS="-Wno-error" WERROR=0
+            cat arch/arm64/boot/Image.gz arch/arm64/boot/dts/qcom/sdm845-v2.1.dtb > arch/arm64/boot/Image.gz-dtb
+            ls -la arch/arm64/boot/Image.gz-dtb
+
+            # 构建 hybris-boot
+            cd /home/build
+            bash build-hybris-boot.sh /home/build/kernel_src/arch/arm64/boot/Image.gz-dtb /home/build/hybris-boot.img
+          '
+          
+          # 拷出产物
+          mkdir -p output
+          sudo docker cp sailfish-sdk:/home/build/hybris-boot.img output/
 
       - name: Upload hybris-boot.img
         uses: actions/upload-artifact@v4
