@@ -68,9 +68,10 @@ jobs:
 
             # 编译
             export ARCH=arm64
-            export CROSS_COMPILE=aarch64-meego-linux-gnu-
+            export CROSS_COMPILE=/opt/cross/bin/aarch64-meego-linux-gnu-
+            # PATH 也要加进去
+            export PATH="/opt/cross/bin:$PATH"
             make fajita_docker_defconfig
-            # 注意 SDK 里是 cc_stack_protector 不是 cc-stack-protector
             scripts/config --disable WERROR
             scripts/config --disable CC_STACKPROTECTOR 2>/dev/null || true
             scripts/config --disable CC_STACKPROTECTOR_STRONG 2>/dev/null || true
