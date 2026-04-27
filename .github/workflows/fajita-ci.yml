@@ -72,7 +72,9 @@ jobs:
             # PATH 也要加进去
             export PATH="/opt/cross/bin:$PATH"
             make fajita_docker_defconfig
-            scripts/config --disable WERROR
+            # meego as 不支持 -EL，去掉
+            sed -i 's/^AS\s*+= -EL/AS +=/' arch/arm64/Makefile
+            sed -i 's/^LD\s*+= -EL/LD +=/' arch/arm64/Makefile
             scripts/config --disable CC_STACKPROTECTOR 2>/dev/null || true
             scripts/config --disable CC_STACKPROTECTOR_STRONG 2>/dev/null || true
             make olddefconfig
