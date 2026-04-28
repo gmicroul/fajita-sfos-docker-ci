@@ -1,4 +1,4 @@
-name: Build Mainline Kernel for fajita with Docker
+name: Build Vendor Kernel with GCC 4.9 (pure device config)
 on:
   push:
     branches:
@@ -6,9 +6,10 @@ on:
   workflow_dispatch:
 
 env:
-  KERNEL_TAG: sdm845-6.18.2-r0
-  KERNEL_REPO: https://gitlab.com/sdm845-mainline/linux.git
-  BUSYBOX_URL: https://github.com/gmicroul/fajita-sfos-ci/releases/download/droid-boot/busybox
+  KERNEL_REPO: https://github.com/VerdandiTeam/android_kernel_oneplus_sdm845-stable.git
+  KERNEL_BRANCH: lineage-16.0
+  CONFIG_GZ_URL: https://github.com/gmicroul/fajita-sfos-ci/releases/download/droid-boot/config.gz
+  GCC49_URL: https://github.com/gmicroul/fajita-sfos-ci/releases/download/droid-boot/gcc-linaro-4.9.tar.xz
 
 jobs:
   build:
@@ -21,99 +22,66 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential gcc-12-aarch64-linux-gnu bc bison flex git curl cpio mkbootimg
+          sudo apt-get install -y build-essential bc bison flex git curl cpio mkbootimg abootimg xz-utils
 
-      - name: Setup cross-compiler
+      - name: Download and setup GCC 4.9
         run: |
-          sudo ln -sf /usr/bin/aarch64-linux-gnu-gcc-12 /usr/bin/aarch64-linux-gnu-gcc || true
+          wget -q -O gcc49.tar.xz ${{ env.GCC49_URL }}
+          sudo tar xf gcc49.tar.xz -C /opt
+          echo "GCC 4.9: $(/opt/gcc-linaro-4.9-2014.11-x86_64_aarch64-linux-gnu/bin/aarch64-linux-gnu-gcc --version | head -1)"
+          echo "CROSS_COMPILE=/opt/gcc-linaro-4.9-2014.11-x86_64_aarch64-linux-gnu/bin/aarch64-linux-gnu-" >> $GITHUB_ENV
 
-      - name: Clone mainline kernel
+      - name: Clone kernel source
         run: |
-          git clone --depth 1 --branch ${{ env.KERNEL_TAG }} ${{ env.KERNEL_REPO }} kernel_src
+          git clone --single-branch --branch ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_REPO }} kernel_src
 
-      - name: Generate defconfig (defconfig + sdm845 + Docker + hybris-boot)
+      - name: Use device config.gz as defconfig
+        run: |
+          wget -q -O config.gz ${{ env.CONFIG_GZ_URL }}
+          zcat config.gz > kernel_src/arch/arm64/configs/fajita_pure_defconfig
+          rm config.gz
+
+      - name: Copy missing headers
         run: |
           cd kernel_src
-          export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          
-          make defconfig
-          scripts/kconfig/merge_config.sh -m .config arch/arm64/configs/sdm845.config
-
-          cat >> .config << 'CFGEOF'
-          # Docker essentials
-          CONFIG_CGROUPS=y
-          CONFIG_CGROUP_CPUACCT=y
-          CONFIG_CGROUP_DEVICE=y
-          CONFIG_CGROUP_FREEZER=y
-          CONFIG_CGROUP_PIDS=y
-          CONFIG_CGROUP_HUGETLB=y
-          CONFIG_MEMCG=y
-          CONFIG_MEMCG_V1=y
-          CONFIG_BLK_CGROUP=y
-          CONFIG_NAMESPACES=y
-          CONFIG_USER_NS=y
-          CONFIG_PID_NS=y
-          CONFIG_NET_NS=y
-          CONFIG_UTS_NS=y
-          CONFIG_IPC_NS=y
-          CONFIG_OVERLAY_FS=y
-          CONFIG_VETH=y
-          CONFIG_BRIDGE=y
-          CONFIG_BRIDGE_NETFILTER=y
-          CONFIG_DUMMY=y
-          CONFIG_MACVLAN=y
-          CONFIG_IPVLAN=y
-          CONFIG_VXLAN=y
-          CONFIG_POSIX_MQUEUE=y
-          CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y
-          CONFIG_IP_NF_NAT=y
-          CONFIG_NF_NAT=y
-          CONFIG_IP6_NF_NAT=y
-          CONFIG_IP6_NF_TARGET_MASQUERADE=y
-          CONFIG_IP_SET=y
-          CONFIG_IP_VS=y
-          CONFIG_IP_VS_PROTO_TCP=y
-          CONFIG_IP_VS_PROTO_UDP=y
-          CONFIG_SECCOMP=y
-          CONFIG_SECCOMP_FILTER=y
-          CONFIG_EXT4_FS_POSIX_ACL=y
-
-          # hybris-boot requirements
-          CONFIG_DEVTMPFS=y
-          CONFIG_DEVTMPFS_MOUNT=y
-          CONFIG_IKCONFIG=y
-          CONFIG_IKCONFIG_PROC=y
-          CONFIG_RD_GZIP=y
-          CONFIG_SYSVIPC=y
-          CONFIG_VT=y
-          CONFIG_INOTIFY_USER=y
-          CONFIG_SIGNALFD=y
-          CONFIG_TMPFS_POSIX_ACL=y
-          CONFIG_AUTOFS4_FS=y
-          CFGEOF
-
-          make olddefconfig
-          echo "Config ready: $(wc -l < .config) lines"
+          mkdir -p include include/trace include/function
+          cp -f drivers/bluetooth/btfm_slim.h include/ 2>/dev/null || true
+          cp -f drivers/bluetooth/btfm_slim_wcn3990.h include/ 2>/dev/null || true
+          cp -f drivers/clk/qcom/mdss/mdss_pll_trace.h include/trace/ 2>/dev/null || true
+          cp -f techpack/audio/asoc/device_event.h include/ 2>/dev/null || true
+          cp -f drivers/gpu/msm/*.h include/ 2>/dev/null || true
+          cp -f drivers/media/platform/msm/camera_oneplus/cam_core/*.h include/ 2>/dev/null || true
+          cp -f drivers/media/platform/msm/camera_oneplus/cam_utils/*.h include/ 2>/dev/null || true
+          cp -f drivers/media/platform/msm/camera_oneplus/cam_isp/isp_hw_mgr/*.h include/ 2>/dev/null || true
+          cp -f drivers/media/platform/msm/camera_oneplus/cam_isp/isp_hw_mgr/hw_utils/include/*.h include/ 2>/dev/null || true
+          cp -f drivers/media/platform/msm/camera_oneplus/cam_req_mgr/*.h include/ 2>/dev/null || true
+          cp -f drivers/media/platform/msm/camera_oneplus/cam_sensor_module/cam_sensor_utils/*.h include/ 2>/dev/null || true
+          cp -f drivers/media/platform/msm/camera_oneplus/cam_sync/*.h include/ 2>/dev/null || true
+          cp -f drivers/platform/msm/ipa/ipa_v3/ipa_trace.h include/trace/ 2>/dev/null || true
+          cp -f drivers/platform/msm/ipa/ipa_clients/rndis_ipa_trace.h include/trace/ 2>/dev/null || true
+          cp -f drivers/soc/qcom/tracer_pkt_private.h include/trace/ 2>/dev/null || true
+          cp -f drivers/usb/gadget/function/u_ncm.h include/function/ 2>/dev/null || true
 
       - name: Compile kernel
         run: |
           cd kernel_src
           export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          make -j$(nproc) Image.gz dtbs 2>&1 | tail -20
-          cat arch/arm64/boot/Image.gz arch/arm64/boot/dts/qcom/sdm845-oneplus-fajita.dtb > arch/arm64/boot/Image.gz-dtb
-          ls -la arch/arm64/boot/Image.gz-dtb
+          export CROSS_COMPILE=/opt/gcc-linaro-4.9-2014.11-x86_64_aarch64-linux-gnu/bin/aarch64-linux-gnu-
+          make fajita_pure_defconfig
+          make -j$(nproc) Image.gz KCFLAGS="-Wno-error" WERROR=0 2>&1 | tail -5
+          ls -la arch/arm64/boot/Image.gz
 
-      - name: Build hybris-boot.img
+      - name: Build boot.img (use original ramdisk)
         run: |
-          mkdir -p output
-          cp scripts/build-hybris-boot.sh .
-          bash build-hybris-boot.sh "$(pwd)/kernel_src/arch/arm64/boot/Image.gz-dtb" "$(pwd)/output/hybris-boot.img"
+          wget -q -O hybris-boot.img "https://github.com/gmicroul/fajita-sfos-ci/releases/download/droid-boot/hybris-boot.img"
+          abootimg -x hybris-boot.img
+          cp kernel_src/arch/arm64/boot/Image.gz ./zImage
+          abootimg --create boot-gcc49.img -f bootimg.cfg -k zImage -r initrd.img
+          abootimg -i boot-gcc49.img
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: hybris-boot-mainline
-          path: output/hybris-boot.img
+          name: boot-gcc49
+          path: boot-gcc49.img
           retention-days: 3
