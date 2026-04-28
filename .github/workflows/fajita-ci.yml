@@ -109,8 +109,7 @@ jobs:
         run: |
           mkdir -p output
           cp scripts/build-hybris-boot.sh .
-          bash build-hybris-boot.sh kernel_src/arch/arm64/boot/Image.gz-dtb output/hybris-boot.img
-          ls -la output/
+          bash build-hybris-boot.sh "$(pwd)/kernel_src/arch/arm64/boot/Image.gz-dtb" "$(pwd)/output/hybris-boot.img"
 
       - name: Upload
         uses: actions/upload-artifact@v4
