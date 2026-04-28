@@ -1,5 +1,5 @@
 #!/bin/bash
-# build-hybris-boot.sh - 在 Sailfish SDK 中生成 hybris-boot.img
+# build-hybris-boot.sh - 生成 hybris-boot.img (host 版本，不用 SDK)
 # 用法: bash build-hybris-boot.sh <Image.gz-dtb> <output-boot.img>
 
 set -e
@@ -17,13 +17,13 @@ fi
 
 echo "=== 构建 hybris-boot.img for $DEVICE ==="
 
+# 下载 hybris-boot 源码
 WORKDIR=$(mktemp -d)
 cd "$WORKDIR"
-
-zypper -n install -y git android-tools-mkbootimg curl 2>/dev/null || true
 git clone --depth 1 https://github.com/mer-hybris/hybris-boot.git
 cd hybris-boot
 
+# 生成 init
 sed -e "s|%DATA_PART%|$DATA_PART|g" \
     -e 's|%BOOTLOGO%|1|g' \
     -e 's|%NEVERBOOT%|0|g' \
@@ -31,15 +31,19 @@ sed -e "s|%DATA_PART%|$DATA_PART|g" \
     init-script > initramfs/init
 chmod +x initramfs/init
 
+# fixup-mountpoints
 bash fixup-mountpoints "$DEVICE" initramfs/init
 echo "init fixup done"
 
+# 下载实体机 busybox
 curl -L -o initramfs/bin/busybox "$BUSYBOX_URL" 2>/dev/null || true
 chmod +x initramfs/bin/busybox 2>/dev/null || true
 echo "busybox: $(ls -la initramfs/bin/busybox)"
 
+# 打包 initramfs
 (cd initramfs && find . | cpio -H newc -o 2>/dev/null | gzip -9 > "$WORKDIR/initramfs.gz")
 
+# mkbootimg
 mkbootimg \
     --kernel "$IMAGE_GZ_DTB" \
     --ramdisk "$WORKDIR/initramfs.gz" \
