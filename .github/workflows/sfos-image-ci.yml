@@ -1,0 +1,120 @@
+name: Build SFOS 5.0.0.67 fajita docker installer zip
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Sailfish OS release version'
+        required: true
+        default: '5.0.0.67'
+      boot_image_url:
+        description: 'URL to custom boot image'
+        required: false
+        default: 'https://github.com/gmicroul/fajita-sfos-docker-ci/releases/download/sailfishos-docker-5.0.0.67-fajita/boot_a-docker-v2.img'
+      kernel_rpm_url:
+        description: 'URL to custom kernel rpm'
+        required: false
+        default: 'https://github.com/gmicroul/fajita-sfos-docker-ci/releases/download/sailfishos-docker-5.0.0.67-fajita/docker-kernel-oneplus6t-4.9.209_docker-1.g5eb4c03127.aarch64.rpm'
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify release repos exist
+        run: |
+          REL="${{ inputs.release }}"
+          for url in \
+            "https://releases.jolla.com/releases/$REL/jolla/aarch64/repodata/repomd.xml" \
+            "https://releases.jolla.com/releases/$REL/jolla-hw/adaptation-common/aarch64/repodata/repomd.xml" \
+            "https://releases.jolla.com/jolla-apps/$REL/aarch64/repodata/repomd.xml" \
+            "https://releases.jolla.com/releases/$REL/hotfixes/aarch64/repodata/repomd.xml" \
+            "https://repo.sailfishos.org/obs/nemo:/testing:/hw:/oneplus:/fajita/sailfishos_5.0/repodata/repomd.xml" \
+            "https://repo.sailfishos.org/obs/nemo:/testing:/hw:/common/sailfishos_5.0_aarch64/repodata/repomd.xml" \
+            "https://repo.sailfishos.org/obs/sailfishos:/chum/5.0_aarch64/repodata/repomd.xml"; do
+            if curl -fsI --max-time 20 -A "zypp/17.33.0" "$url" >/dev/null; then
+              echo "OK:   $url"
+            else
+              echo "WARN: $url"
+            fi
+          done
+
+      - name: Prepare custom boot image
+        run: |
+          if [ -n "${{ inputs.boot_image_url }}" ]; then
+            wget -q -O boot_a-docker-v2.img "${{ inputs.boot_image_url }}"
+          fi
+          if [ ! -f boot_a-docker-v2.img ]; then
+            echo "::error::boot_a-docker-v2.img missing after download (URL failed?)."
+            exit 1
+          fi
+          ls -la boot_a-docker-v2.img
+
+      - name: Prepare custom kernel rpm
+        run: |
+          if [ -n "${{ inputs.kernel_rpm_url }}" ]; then
+            wget -q -O docker-kernel-oneplus6t.aarch64.rpm "${{ inputs.kernel_rpm_url }}"
+          fi
+          shopt -s nullglob
+          RPMS=(docker-kernel-oneplus6t*.rpm)
+          if [ ${#RPMS[@]} -eq 0 ]; then
+            echo "::error::No docker-kernel-oneplus6t*.rpm found (URL failed?)."
+            exit 1
+          fi
+          ls -la "${RPMS[@]}"
+
+      - name: Register qemu-aarch64 binfmt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static binfmt-support
+          sudo docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+          ls -la /proc/sys/fs/binfmt_misc/ | grep qemu-aarch64
+
+      - name: Build image with mic (openSUSE container)
+        run: |
+          REL="${{ inputs.release }}"
+          mkdir -p rpmrepo
+          cp docker-kernel-oneplus6t*.rpm rpmrepo/
+          sudo docker run --rm --privileged \
+            -v "$PWD":/work -w /work \
+            opensuse/tumbleweed bash -lc '
+              set -e
+              zypper -n --gpg-auto-import-keys install -y mic2 createrepo_c
+              createrepo_c /work/rpmrepo
+              cd /work
+              mic2 create fs \
+                --arch=aarch64 \
+                --tokenmap=ARCH:aarch64,RELEASE:'"$REL"',EXTRA_NAME:-docker \
+                --record-pkgs=name,url \
+                --outdir=sfe-fajita-'"$REL"'-docker \
+                --pack-to=sfe-fajita-'"$REL"'-docker.tar.bz2 \
+                --no-gpg-check \
+                Jolla-@RELEASE@-fajita-@ARCH@-docker.ks 2>&1 | tail -80
+            '
+
+      - name: Show results
+        run: |
+          REL="${{ inputs.release }}"
+          ls -la sfe-fajita-$REL-docker/
+          echo "---"
+          ls -la *.tar.bz2 2>/dev/null || true
+
+      - name: Upload installer zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: sfos-${{ inputs.release }}-fajita-docker
+          path: |
+            sfe-fajita-${{ inputs.release }}-docker/*.zip*
+          retention-days: 7
+
+      - name: Upload rootfs archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: rootfs-${{ inputs.release }}-fajita-docker
+          path: |
+            sfe-fajita-${{ inputs.release }}-docker.tar.bz2
+          retention-days: 3
+          compression-level: 0
