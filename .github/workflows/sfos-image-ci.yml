@@ -73,19 +73,20 @@ jobs:
           sudo docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
           ls -la /proc/sys/fs/binfmt_misc/ | grep qemu-aarch64
 
-      - name: Build image with mic (openSUSE container)
+      - name: Build image with mic (Platform SDK container)
         run: |
           REL="${{ inputs.release }}"
           mkdir -p rpmrepo
           cp docker-kernel-oneplus6t*.rpm rpmrepo/
           sudo docker run --rm --privileged \
             -v "$PWD":/work -w /work \
-            opensuse/tumbleweed bash -lc '
+            ghcr.io/r1tschy/sailfishos-platform-sdk:5.0.0.62 bash -lc '
               set -e
-              zypper -n --gpg-auto-import-keys install -y mic2 createrepo_c
+              command -v mic >/dev/null || zypper --non-interactive install mic
+              command -v createrepo_c >/dev/null || zypper --non-interactive install createrepo_c
               createrepo_c /work/rpmrepo
               cd /work
-              mic2 create fs \
+              mic create fs \
                 --arch=aarch64 \
                 --tokenmap=ARCH:aarch64,RELEASE:'"$REL"',EXTRA_NAME:-docker \
                 --record-pkgs=name,url \
